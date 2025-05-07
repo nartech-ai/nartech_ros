@@ -1,75 +1,52 @@
 from hyperon import *
 from MeTTa import *
-import tkinter as tk
-import multiprocessing
-import threading
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QTextEdit, QPushButton, QVBoxLayout
+import multiprocessing, threading, sys
 
 def guiplugin_init(runnerinstance):
     global runner
     runner = runnerinstance
     runner.run("!(add-atom &self (nartech.gui.value ()))")
 
-gui_lock = threading.Lock()
-gui_ret = dict([])
-def gui_finished(value, request_id):
-    global gui_ret
+gui_lock, gui_ret = threading.Lock(), {}
+
+def gui_finished(val, rid):
     with gui_lock:
-        gui_ret[request_id] = value
+        gui_ret[rid] = val
 
-def gui_process(conn, title, inputhint, width, height):
-    """Run the Tkinter GUI in a separate process and send result back."""
-    root = tk.Tk()
-    root.title(title)
-    root.geometry(f"{width}x{height}")
-    returntext = tk.StringVar()
-    def get_text():
-        returntext.set(text_entry.get("1.0", tk.END).strip())
-        conn.send(returntext.get() if returntext.get() else "()")  # Send result
-        conn.close()
-        root.destroy()
-    tk.Label(root, text=title).pack()
-    text_entry = tk.Text(root, width=width // 10, height=height // 40)
-    text_entry.insert("1.0", inputhint)
-    text_entry.pack()
-    tk.Button(root, text="Submit", command=get_text).pack()
-    root.mainloop()
+def gui_process(conn, title, hint, w, h):
+    app = QApplication(sys.argv)
+    win = QWidget(); win.setWindowTitle(title); win.resize(w, h)
+    lay = QVBoxLayout(win)
+    lay.addWidget(QLabel(title))
+    txt = QTextEdit(); txt.setPlainText(hint); lay.addWidget(txt)
+    btn = QPushButton("Submit"); lay.addWidget(btn)
+    btn.clicked.connect(lambda: (conn.send(txt.toPlainText().strip() or "()"), conn.close(), win.close(), app.quit()))
+    win.show(); app.exec_()
 
-def wait_for_gui_result(process, conn, request_id):
-    """Thread that waits for GUI input and calls callback."""
-    result = conn.recv()  # Wait for user input
-    process.join()  # Ensure process exits cleanly
-    gui_finished(result, request_id)  # Call the callback with result
+def wait_proc(proc, conn, rid):
+    gui_finished(conn.recv(), rid); proc.join()
 
-def create_gui(title, inputhint, request_id, width=800, height=200):
-    """Start a GUI subprocess and return immediately."""
-    parent_conn, child_conn = multiprocessing.Pipe()
-    p = multiprocessing.Process(target=gui_process, args=(child_conn, title, inputhint, width, height))
-    p.start()
-    threading.Thread(target=wait_for_gui_result, args=(p, parent_conn, request_id), daemon=True).start()
+def create_gui(title, hint, rid, w=800, h=200):
+    pc, cc = multiprocessing.Pipe()
+    p = multiprocessing.Process(target=gui_process, args=(cc, title, hint, w, h)); p.start()
+    threading.Thread(target=wait_proc, args=(p, pc, rid), daemon=True).start()
 
 request_id = 1
 def call_gui(*a):
-    global runner, request_id
+    global request_id
     cmd = str(a[0])
     if cmd.isnumeric():
-        with gui_lock:
-            previous_request_id = int(cmd)
-            if previous_request_id not in gui_ret:
-                value = "()"
-            else:
-                value = gui_ret[previous_request_id] #fetch entered value by user
-            parser = SExprParser(value)
-    else:
-        title = cmd.split(")")[0][2:]
-        inputhint = ")".join(cmd.split(")")[1:])[1:-1]
-        dictated_request_id = cmd.split("(")[1].split(" ")[0]
-        if dictated_request_id.isnumeric():
-            request_id = int(dictated_request_id)
-        create_gui(title, inputhint, request_id)
-        parser = SExprParser(str(request_id))
-        request_id += 1
+        val = gui_ret.get(int(cmd), "()")
+        return SExprParser(val).parse(runner.tokenizer())
+    title = cmd.split(")")[0][2:]; hint = ")".join(cmd.split(")")[1:])[1:-1].strip()
+    title = title.replace("(", "")
+    rid_str = cmd.split("(")[1].split(" ")[0]
+    if rid_str.isnumeric(): request_id = int(rid_str)
+    create_gui(title, hint, request_id)
+    parser = SExprParser(str(request_id)); request_id += 1
     return parser.parse(runner.tokenizer())
 
-# Example usage from a ROS thread:
 if __name__ == "__main__":
-    print("User input:", create_gui("Enter MeTTa expression:", "(+ 1 1)"))
+    multiprocessing.freeze_support()
+    create_gui("Enter MeTTa expression:", "(+ 1 1)", 0)
