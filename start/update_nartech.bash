@@ -4,27 +4,26 @@
 # NACE, ONA, MeTTa-NARS, MeTTa-Morph, NARS-GPT
 # as well as builds packages for ROS workspace
 
-mv /home/nartech/Desktop/logo*.png /home/nartech/Documents/
-cd ~/nartech_ws/src/nartech_ros/
-git pull
-cd ~/AniNAL
-git pull
-cd ~/OpenNARS-for-Applications
-git pull
-sh build.sh
-cd ~/NACE
-git pull
-cd ~/metta-morph
-git pull
-cd ~/metta-morph/metta-nars
-git pull
-cd ~/metta-nars
-git pull
-cd ~/NARS-GPT
-git pull
-
 # Check if the local branch is behind the remote branch
 if zenity --question --text="Do you want to build NARTECH?" --title="Build NARTECH" --icon="/home/nartech/Documents/logo.png"; then
+    mv /home/nartech/Desktop/logo*.png /home/nartech/Documents/
+    cd ~/nartech_ws/src/nartech_ros/
+    git pull
+    cd ~/AniNAL
+    git pull
+    cd ~/OpenNARS-for-Applications
+    git pull
+    sh build.sh
+    cd ~/NACE
+    git pull
+    cd ~/metta-morph
+    git pull
+    cd ~/metta-morph/metta-nars
+    git pull
+    cd ~/metta-nars
+    git pull
+    cd ~/NARS-GPT
+    git pull
     # User selected Yes, proceed with updates
     cd ~/nartech_ws
     colcon build
