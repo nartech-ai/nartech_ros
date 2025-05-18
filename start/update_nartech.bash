@@ -32,7 +32,7 @@ if zenity --question --text="Do you want to update NARTECH?" --title="Update NAR
 fi
 
 # Common actions regardless of the choice
-zenity --info --text "NARTECH ready! Press 'OK', then 'Terminal', then enter './start_nartech.bash'!  " --title="Update Status" --icon="/home/nartech/Documents/logo.png"
+zenity --info --text "NARTECH ready! Press 'OK', then 'Terminal', then enter './start_nartech.bash metta demo_with_nars.metta'!  " --title="Update Status" --icon="/home/nartech/Documents/logo.png"
 
 geany /home/nartech/NACE/input.metta &
 
