@@ -5,7 +5,7 @@
 # as well as builds packages for ROS workspace
 
 # Check if the local branch is behind the remote branch
-if zenity --question --text="Do you want to build NARTECH?" --title="Build NARTECH" --icon="/home/nartech/Documents/logo.png"; then
+if zenity --question --text="Do you want to update NARTECH?" --title="Update NARTECH" --icon="/home/nartech/Documents/logo.png"; then
     mv /home/nartech/Desktop/logo*.png /home/nartech/Documents/
     cd ~/nartech_ws/src/nartech_ros/
     git pull
