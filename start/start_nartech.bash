@@ -27,7 +27,7 @@ if [ "$1" != "slow" ] && [ "$2" != "slow" ] && [ "$3" != "slow" ]; then
         python3 /home/nartech/nartech_ws/src/nartech_ros/optional/gui.py &
     fi
     geany /home/nartech/NACE/input.metta &
-    ros2 launch nav2_bringup tb4_simulation_launch.py slam:=True nav:=True headless:=True autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD
+    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=True autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD
 else
     export MY_WORLD=/opt/ros/jazzy/share/nav2_minimal_tb4_sim/worlds/depot.sdf
     export QT_QPA_PLATFORM=xcb
@@ -37,5 +37,5 @@ else
         python3 /home/nartech/nartech_ws/src/nartech_ros/optional/gui.py &
     fi
     geany /home/nartech/NACE/input.metta &
-    ros2 launch nav2_bringup tb4_simulation_launch.py slam:=True nav:=True headless:=False autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD
+    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=False autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD
 fi
