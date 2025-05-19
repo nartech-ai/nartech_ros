@@ -36,12 +36,12 @@ request_id = 1
 def call_gui(*a):
     global request_id
     cmd = str(a[0])
-    if cmd.isnumeric():
-        val = gui_ret.get(int(cmd), "()")
+    if cmd.split(".")[0].isnumeric(): #split by . as in hyperon it comes as 1.0 instead of 1
+        val = gui_ret.get(int(cmd.split(".")[0]), "()")
         return SExprParser(val).parse(runner.tokenizer())
     title = cmd.split(")")[0][2:]; hint = ")".join(cmd.split(")")[1:])[1:-1].strip()
     title = title.replace("(", "")
-    rid_str = cmd.split("(")[1].split(" ")[0]
+    rid_str = cmd.split(" ")[0]
     if rid_str.isnumeric(): request_id = int(rid_str)
     create_gui(title, hint, request_id)
     parser = SExprParser(str(request_id)); request_id += 1
