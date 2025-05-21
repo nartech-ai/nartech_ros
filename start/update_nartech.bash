@@ -6,6 +6,11 @@
 
 # Check if the local branch is behind the remote branch
 if zenity --question --text="Do you want to update NARTECH?" --title="Update NARTECH" --icon="/home/nartech/Documents/logo.png"; then
+    grep -qxF "alias metta='python3 ~/hyperon-experimental/python/hyperon/metta.py'" ~/.bashrc || echo "alias metta='python3 ~/hyperon-experimental/python/hyperon/metta.py'" >> ~/.bashrc
+    grep -q '^export OPENAI_API_KEY=' ~/.bashrc || { key=$(zenity --entry --title="Set OPENAI_API_KEY" --text="Enter your OpenAI API Key:"); [ -n "$key" ] && echo "export OPENAI_API_KEY=\"$key\"" >> ~/.bashrc; }
+    cd ~
+    ls metta-motto || git clone https://github.com/zarqa-ai/metta-motto
+    cp -r ~/metta-motto/motto /home/nartech/nartech_ws/src/nartech_ros/
     mv /home/nartech/Desktop/logo*.png /home/nartech/Documents/
     cd ~/nartech_ws/src/nartech_ros/
     git pull
