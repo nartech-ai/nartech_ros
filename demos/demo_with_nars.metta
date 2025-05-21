@@ -27,7 +27,7 @@
              (superpose ((nartech.nars.perceive $objects)
                          ;Feed the goal, passing on NARS operation to ROS2 for execution
                          (if (or (== () (narsgoal))
-                                 (== () (nartech.nars.execute 3 (narsgoal)))) ;3 input circles
+                                 (== () (nartech.nars.execute 3 (narsgoal)))) ;3 input cycles
                              ;if no operation was executed, go to nearest unknown location
                              (let (detection unknown $coordinates) (superpose $unknowns)
                                   (nartech.ros (go $coordinates))) ())
