@@ -6,6 +6,9 @@
 
 # Check if the local branch is behind the remote branch
 if zenity --question --text="Do you want to update NARTECH?" --title="Update NARTECH" --icon="/home/nartech/Documents/logo.png"; then
+    cd ~/nartech_ws/src
+    rm -rf nartech_moveit_config
+    cd ~
     grep -qxF "alias metta='python3 ~/hyperon-experimental/python/hyperon/metta.py'" ~/.bashrc || echo "alias metta='python3 ~/hyperon-experimental/python/hyperon/metta.py'" >> ~/.bashrc
     grep -q '^export OPENAI_API_KEY=' ~/.bashrc || { key=$(zenity --entry --title="Set OPENAI_API_KEY" --text="Enter your OpenAI API Key:"); [ -n "$key" ] && echo "export OPENAI_API_KEY=\"$key\"" >> ~/.bashrc; }
     cd ~
@@ -18,6 +21,8 @@ if zenity --question --text="Do you want to update NARTECH?" --title="Update NAR
     mv /home/nartech/Desktop/logo*.png /home/nartech/Documents/
     cd ~/nartech_ws/src/nartech_ros/
     git pull
+    cp ~/nartech_ws/src/nartech_ros/manipulation/config/open_manipulator_controllers.yaml ~/nartech_ws/config/open_manipulator_controllers.yaml
+    cp -r ~/nartech_ws/src/nartech_ros/manipulation/tb4_openmanipulator_moveit ~/nartech_ws/src/
     cd ~/AniNAL
     git pull
     cd ~/OpenNARS-for-Applications

@@ -9,7 +9,9 @@ if [ "$1" == "metta" ]; then
         geany "/home/nartech/nartech_ws/src/nartech_ros/demos/$2" &
         gnome-terminal -- bash -c "sleep 20 && cd /home/nartech/nartech_ws/src/nartech_ros/ && python3 main.py ./demos/$2; exec bash" &
     fi
-    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=True autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD
+    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=True autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD &
+    sleep 20 && ros2 run controller_manager spawner gripper_controller --controller-manager /controller_manager
+    ros2 launch tb4_openmanipulator_moveit move_group.launch.py
     exit 0
 fi
 if [ "$1" != "nogrid" ] && [ "$2" != "nogrid" ] && [ "$3" != "nogrid" ]; then
@@ -27,7 +29,9 @@ if [ "$1" != "slow" ] && [ "$2" != "slow" ] && [ "$3" != "slow" ]; then
         python3 /home/nartech/nartech_ws/src/nartech_ros/optional/gui.py &
     fi
     geany /home/nartech/NACE/input.metta &
-    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=True autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD
+    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=True autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD &
+    sleep 20 && ros2 run controller_manager spawner gripper_controller --controller-manager /controller_manager
+    ros2 launch tb4_openmanipulator_moveit move_group.launch.py
 else
     export MY_WORLD=/opt/ros/jazzy/share/nav2_minimal_tb4_sim/worlds/depot.sdf
     export QT_QPA_PLATFORM=xcb
@@ -37,5 +41,7 @@ else
         python3 /home/nartech/nartech_ws/src/nartech_ros/optional/gui.py &
     fi
     geany /home/nartech/NACE/input.metta &
-    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=False autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD
+    ros2 launch nav2_bringup tb4_simulation_launch.py use_fake_hardware:=False use_sim:=True slam:=True nav:=True headless:=False autostart:=True use_sim_time:=True rviz_config_file:=nartech_view.rviz world:=$MY_WORLD &
+    sleep 20 && ros2 run controller_manager spawner gripper_controller --controller-manager /controller_manager
+    ros2 launch tb4_openmanipulator_moveit move_group.launch.py
 fi
