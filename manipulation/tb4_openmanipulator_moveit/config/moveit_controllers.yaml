@@ -51,6 +51,7 @@ moveit_simple_controller_manager:
       default: false
       joints:
         - gripper_left_joint
+        - gripper_right_joint
 
 moveit_controller_manager:
   ros__parameters:

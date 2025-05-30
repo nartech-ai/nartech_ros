@@ -21,6 +21,6 @@ arm_controller:
 
 gripper_controller:
   ros__parameters:
-    joints: ["gripper_left_joint"]
+    joints: ["gripper_left_joint", "gripper_right_joint"]
     command_interfaces: ["position"]
     state_interfaces: ["position", "velocity"]

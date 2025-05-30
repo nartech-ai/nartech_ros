@@ -5,6 +5,7 @@
 # as well as builds packages for ROS workspace
 
 # Check if the local branch is behind the remote branch
+
 if zenity --question --text="Do you want to update NARTECH?" --title="Update NARTECH" --icon="/home/nartech/Documents/logo.png"; then
     cd ~/nartech_ws/src
     rm -rf nartech_moveit_config
@@ -23,6 +24,7 @@ if zenity --question --text="Do you want to update NARTECH?" --title="Update NAR
     git pull
     cp ~/nartech_ws/src/nartech_ros/manipulation/config/open_manipulator_controllers.yaml ~/nartech_ws/config/open_manipulator_controllers.yaml
     cp -r ~/nartech_ws/src/nartech_ros/manipulation/tb4_openmanipulator_moveit ~/nartech_ws/src/
+    cp -r ~/nartech_ws/src/nartech_ros/manipulation/open_manipulator_x_description ~/nartech_ws/src/
     cd ~/AniNAL
     git pull
     cd ~/OpenNARS-for-Applications

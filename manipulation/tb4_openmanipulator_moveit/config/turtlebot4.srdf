@@ -44,9 +44,11 @@
     </group_state>
     <group_state name="open" group="gripper">
         <joint name="gripper_left_joint" value="0.019"/>
+        <joint name="gripper_right_joint" value="0.019"/>
     </group_state>
     <group_state name="close" group="gripper">
         <joint name="gripper_left_joint" value="-0.01"/>
+        <joint name="gripper_right_joint" value="-0.01"/>
     </group_state>
     <!--END EFFECTOR: Purpose: Represent information about an end effector.-->
     <end_effector name="ee" parent_link="link5" group="gripper" parent_group="arm"/>
