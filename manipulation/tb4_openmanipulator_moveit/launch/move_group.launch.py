@@ -18,6 +18,10 @@ def generate_launch_description():
 
     with open(controller_yaml_path, "r") as f:
         controller_yaml_dict = yaml.safe_load(f)
+    
+    sensor_yaml_path = "/home/nartech/nartech_ws/src/tb4_openmanipulator_moveit/config/sensors_3d.yaml"
+    with open(sensor_yaml_path, "r") as f:
+        sensor_params = yaml.safe_load(f)
         
     ros__params = controller_yaml_dict["moveit_simple_controller_manager"]["ros__parameters"]
     mgr_params  = controller_yaml_dict["moveit_controller_manager"]["ros__parameters"]
@@ -32,6 +36,7 @@ def generate_launch_description():
                 {"use_sim_time": True},
                 {"moveit_simple_controller_manager": ros__params},
                 {"moveit_controller_manager": mgr_params},
+                sensor_params,
             ]
         )
     ])
