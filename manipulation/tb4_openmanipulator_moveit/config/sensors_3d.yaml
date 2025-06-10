@@ -4,12 +4,10 @@ sensors:
 depth_camera:
   sensor_plugin: occupancy_map_monitor/DepthImageOctomapUpdater # name of the plugin that we are using : [PointCloudOctomapUpdater or DepthImageOctomapUpdater]
   image_topic: /rgbd_camera/depth_image # topic to listen on for a depth image
-  queue_size: 5                             # number of images to queue up
-  near_clipping_plane_distance: 0.003       # minimum distance before lack of visibility
-  far_clipping_plane_distance: 5.0          # maximum distance before lack of visibility
+  queue_size: 1                             # number of images to queue up
+  near_clipping_plane_distance: 0.1         # minimum distance before lack of visibility
+  far_clipping_plane_distance: 1.0          # maximum distance before lack of visibility
   shadow_threshold: 0.2                     # minimum brightness of the shadow map below an entity for its dynamic shadow to be visible
-  padding_offset: 0.03                      # size of the padding (in cm).
-  padding_scale: 4.0                        # scale of the padding
+  padding_scale: 1.0                        # scale of the padding
   max_update_rate: 1.0                      # octomap representation will be updated at rate less than or equal to this value
   filtered_cloud_topic: filtered_cloud      # topic on which the filtered cloud will be published (mainly for debugging)
-  ns: realsense                             # namespace
