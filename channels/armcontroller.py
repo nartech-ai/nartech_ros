@@ -13,6 +13,7 @@ from rclpy.action import ActionClient
 from std_srvs.srv import Empty
 from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Twist
+from rclpy.task import Future
 
 # Assume mettabridge defines these constants and functions:
 if __name__ == '__main__': #arm test does not need that
@@ -49,137 +50,208 @@ class ArmController:
         self.control_gripper("open")
         self.move_end_effector_to(x=0.15, y=0.0, z=0.3)
 
-    def pick_at(self, x, y, z):
-        self.node.get_logger().info("arm_controller: PICK AT COORDINATE " + f"{x} {y} {z}")
-        #sanitize end location
-        #x=0.2..0.3 z=0.1..0.2 works for pick!
-        #unused: for x=0.2 it can reach up to z=0.4 if necessary (to grap from a platform)
-        if y != 0 : y = 0.0
-        if x < 0.2: x = 0.2
-        if x > 0.3: x = 0.3
-        if z < 0.1: z = 0.1
-        if z > 0.2: z = 0.2
-        self.node.get_logger().info("arm_controller: PICK CORRECTED " + f"{x} {y} {z}")
-        #proceed in the following order: (async programming style)
-        def after_open(_):
-            self.move_end_effector_to(x=0.15, y=0.0, z=0.3).add_done_callback(after_lifted)
-        def after_lifted(_):
-            self.move_end_effector_to(x=x, y=y, z=z).add_done_callback(after_descended)
-        def after_descended(_):
-            self.control_gripper("close").add_done_callback(after_closed)
-        def after_closed(_):
-            self.move_end_effector_to(x=0.15, y=0.0, z=0.3).add_done_callback(after_final_lift)
-        def after_final_lift(_):
-            self.node.get_logger().info("arm_controller: DONE")
-        self.control_gripper("open").add_done_callback(after_open)
-
-    def pick(self, objectlabel):
+    def pick_at(self, x: float, y: float, z: float, *, done_cb=None) -> Future:
         """
-        Drive the mobile base until the target object is centred in the camera
-        and 20 cm away, then trigger pick_at().
+        Execute an open-approach-grasp-lift sequence.
 
         Parameters
         ----------
-        objectlabel : str
-            The semantic-SLAM label of the object to pick.
+        x, y, z : float
+            Desired grasp position in the arm base frame (metres).
+        done_cb : callable, optional
+            Function ``done_cb(success: bool)`` invoked when the sequence finishes.
+
+        Returns
+        -------
+        rclpy.task.Future
+            Resolves to ``True`` on success, ``False`` on failure.
         """
-        # ---------- Preconditions ------------------------------------------------
-        if NAV_STATE_GET() == NAV_STATE_BUSY or getattr(self, "holding", False):
+        # ─── contract object we’ll fulfil at the end ────────────────────────────
+        result_future: Future = Future()
+
+        # ─── sanitize end-effector target ───────────────────────────────────────
+        if y != 0:
+            y = 0.0
+        x = min(max(x, 0.2), 0.3)   # clamp 0.2 ≤ x ≤ 0.3
+        z = min(max(z, 0.1), 0.2)   # clamp 0.1 ≤ z ≤ 0.2
+
+        self.node.get_logger().info(
+            f"arm_controller: PICK CORRECTED {x:.2f} {y:.2f} {z:.2f}"
+        )
+
+        # ─── common success / failure paths ─────────────────────────────────────
+        def _finish(success: bool) -> None:
+            if done_cb:
+                try:
+                    done_cb(success)
+                except Exception as e:  # noqa: BLE001
+                    self.node.get_logger().warn(
+                        f"arm_controller: done_cb raised {e!r}"
+                    )
+            if not result_future.done():
+                result_future.set_result(success)
+
+        def _abort(reason: str, exc: BaseException | None = None) -> None:
+            msg = f"arm_controller: ABORT – {reason}"
+            if exc:
+                msg += f" ({exc!r})"
+            self.node.get_logger().error(msg)
+            _finish(False)
+
+        # ─── async chain helpers (each checks the previous step) ────────────────
+        def after_open(fut):
+            if fut.exception():
+                return _abort("gripper open failed", fut.exception())
+            self.move_end_effector_to(x=0.15, y=0.0, z=0.3)\
+                .add_done_callback(after_lifted)
+
+        def after_lifted(fut):
+            if fut.exception():
+                return _abort("pre-lift failed", fut.exception())
+            self.move_end_effector_to(x=x, y=y, z=z)\
+                .add_done_callback(after_descended)
+
+        def after_descended(fut):
+            if fut.exception():
+                return _abort("descend failed", fut.exception())
+            self.control_gripper("close").add_done_callback(after_closed)
+
+        def after_closed(fut):
+            if fut.exception():
+                return _abort("gripper close failed", fut.exception())
+            self.move_end_effector_to(x=0.15, y=0.0, z=0.3)\
+                .add_done_callback(after_final_lift)
+
+        def after_final_lift(fut):
+            if fut.exception():
+                return _abort("final lift failed", fut.exception())
+            self.node.get_logger().info("arm_controller: DONE")
+            _finish(True)
+
+        # ─── kick things off ────────────────────────────────────────────────────
+        self.control_gripper("open").add_done_callback(after_open)
+        return result_future
+
+    def pick(self, objectlabel: str) -> None:
+        # ─── 1. Guards ─────────────────────────────────────────────────────────
+        if (
+            NAV_STATE_GET() == NAV_STATE_BUSY
+            or getattr(self, "holding", False)
+            or getattr(self, "picking", False)
+        ):
             return
         NAV_STATE_SET(NAV_STATE_BUSY)
-        if not (objectlabel and objectlabel in self.semantic_slam.previous_detections):
-            self.node.get_logger().info("arm_controller: Pick failed, object location not observed or remembered")
+        self.picking = True
+
+        if (
+            not objectlabel
+            or objectlabel not in self.semantic_slam.previous_detections
+        ):
+            self.node.get_logger().info(
+                "arm_controller: Pick failed, object location not observed or remembered"
+            )
             NAV_STATE_SET(NAV_STATE_FAIL)
+            self.picking = False
             return
-        # Remember where the object was last seen (for pick_at).
-        (_, _, _, _, _, _, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
+
+        # ─── 2. Seed variables from the latest detection ───────────────────────
+        (
+            t0,
+            _,
+            _,
+            _,
+            _,
+            _,
+            spoint_base_link,
+            imagecoords_depth,
+        ) = self.semantic_slam.previous_detections[objectlabel]
         target_point = spoint_base_link.point
-        # ---------- Controller tuning constants ----------------------------------
+
+        # ─── 3. Constants ───────────────────────────────────────────────────────
         GOAL_TARGET_DISTANCE = 0.4
-        yaw_tol   = 0.06       # ± ~2.3 degrees (image plane error)
-        depth_tol = 0.08       # ± 3 cm
-        k_yaw     = 0.3 #0.3 #0.6        # rad / s per unit x_rel
-        k_fwd     = 0.25 #0.2 #25       # m / s per metre depth error
-        MIN_ANG = 0.0 #0.08      # rad / s  → tweak until the robot just starts turning
-        MIN_LIN = 0.1 # #0.04      # m / s
-        CORRECTION_TIMSTEP = 0.5
-        GRIPPER_GRIP_HEIGHT = 0.2 #how much lower the gripper should ideally grab the object due to its dimensions
-        # ---------- Internal state -----------------------------------------------
+        yaw_tol, depth_tol = 0.06, 0.08
+        k_yaw,  k_fwd      = 0.3,  0.1
+        MIN_ANG, MIN_LIN   = 0.0,  0.1
+        CORRECTION_DT      = 0.5
+        GRIPPER_GRIP_HEIGHT = 0.2
+
         self.correction_attempts = 0
         self.max_corrections     = 50
-        # Publish a zero-velocity command so the base really stops.
+
         def _stop_motion():
             self.cmd_pub.publish(Twist())
-        # Store on the instance so the callback can call it.
         self._stop_motion = _stop_motion
-        # ---------- Timer callback -----------------------------------------------
-        def correction_step():
-            # ❶ Abort if the target is gone.
-            move_out = False
-            if objectlabel not in self.semantic_slam.previous_detections:
-                move_out = True
-            else:
-                t, _, _, _, _, _, spoint_base_link, imagecoords_depth = self.semantic_slam.previous_detections[objectlabel]
-                if time.time() - t > 5.0:
-                    move_out = True
-            if move_out:
-                # ①  Back up 10 cm at −0.10 m/s
+
+        # ─── 4. Timer callback ─────────────────────────────────────────────────
+        def correction_step() -> None:
+            nonlocal target_point, imagecoords_depth  # ★ declare non-local vars
+            # ❶ Latest observation (needed *before* any read)
+            (t, _, _, _, _, _, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
+            target_point = spoint_base_link.point
+            # ❷ Abort if object missing for >5 s
+            if time.time() - t > 5.0:
                 back_twist = Twist()
                 back_twist.linear.x = -0.1
                 self.cmd_pub.publish(back_twist)
-                # ②  Stop after d / |v|  = 0.10 m / 0.10 m s⁻¹ = 1 s
                 def _after_reverse():
                     nonlocal reverse_timer
-                    self._stop_motion()
-                    self.node.get_logger().info("arm_controller: Object absent → backed away 10 cm")
+                    _stop_motion()
+                    self.node.get_logger().info(
+                        "arm_controller: Object absent → backed away 10 cm"
+                    )
                     NAV_STATE_SET(NAV_STATE_FAIL)
-                    reverse_timer.cancel()       # <- cancel so it fires only once
-                reverse_timer = self.node.create_timer(
-                    1.0,            # seconds
-                    _after_reverse, # callback
-                )
-                # ③  Cancel correction loop so no more cmds are published
+                    self.picking = False
+                    reverse_timer.cancel()
+                reverse_timer = self.node.create_timer(1.0, _after_reverse)
                 self.correction_timer.cancel()
                 return
+            # ❸ Control law
             x_rel, _, depth = imagecoords_depth
-            x_err = (x_rel - 0.5) * 2.0
-            target_point = spoint_base_link.point
+            x_err           = (x_rel - 0.5) * 2.0
+            depth_err       = depth - GOAL_TARGET_DISTANCE
             twist = Twist()
-            # ❷ Yaw correction (same sign as x_rel → turn toward the object).
             if abs(x_err) > yaw_tol:
                 twist.angular.z = -k_yaw * x_err
                 if 0 < abs(twist.angular.z) < MIN_ANG:
                     twist.angular.z = math.copysign(MIN_ANG, twist.angular.z)
-            # ❸ Forward correction (stop ~40 cm in front of object).
-            depth_error = depth - GOAL_TARGET_DISTANCE
-            if depth_error > depth_tol:
-                twist.linear.x = k_fwd * depth_error
+            if depth_err > depth_tol:
+                twist.linear.x = k_fwd * depth_err
                 if 0 < twist.linear.x < MIN_LIN:
                     twist.linear.x = MIN_LIN
-            # Publish base command.
             self.cmd_pub.publish(twist)
             self.node.get_logger().info(
                 f"Correction {self.correction_attempts + 1} | "
                 f"x_err={x_err:+.2f}, depth={depth:.2f}, "
-                f"cmd=({twist.linear.x:.2f}, {twist.angular.z:.2f})")
-            # ❹ Convergence check.
-            if abs(x_err) <= yaw_tol and abs(depth_error) <= depth_tol:
-                self._stop_motion()
+                f"cmd=({twist.linear.x:.2f}, {twist.angular.z:.2f})"
+            )
+            # ❹ Converged?
+            if abs(x_err) <= yaw_tol and abs(depth_err) <= depth_tol:
+                _stop_motion()
                 self.correction_timer.cancel()
-                self.node.get_logger().info("arm_controller: Aligned and close. Executing pick.")
-                self.pick_at(target_point.x, 0.0, target_point.z - GRIPPER_GRIP_HEIGHT)
-                NAV_STATE_SET(NAV_STATE_SUCCESS)        # optional, if you have it
+                self.node.get_logger().info(
+                    "arm_controller: Aligned and close. Executing pick."
+                )
+                def _on_grasp_done(success: bool):
+                    #self.holding = success
+                    NAV_STATE_SET(NAV_STATE_SUCCESS if success else NAV_STATE_FAIL)
+                    self.picking = False
+                self.pick_at(
+                    target_point.x,
+                    0.0,
+                    target_point.z - GRIPPER_GRIP_HEIGHT,
+                    done_cb=_on_grasp_done,
+                )
                 return
-            # ❺ Bail out if we’re stuck.
+            # ❺ Bail-out if stuck
             self.correction_attempts += 1
             if self.correction_attempts >= self.max_corrections:
-                self._stop_motion()
+                _stop_motion()
                 self.correction_timer.cancel()
                 self.node.get_logger().info("arm_controller: Too many corrections.")
                 NAV_STATE_SET(NAV_STATE_FAIL)
-                return
-        # ---------- Kick off the periodic controller -----------------------------
-        self.correction_timer = self.node.create_timer(CORRECTION_TIMSTEP, correction_step) #wait 0.5 sec
+                self.picking = False
+        # ─── 5. Start periodic controller ──────────────────────────────────────
+        self.correction_timer = self.node.create_timer(CORRECTION_DT, correction_step)
 
     def drop(self):
         if NAV_STATE_GET() == NAV_STATE_BUSY or not self.holding:
