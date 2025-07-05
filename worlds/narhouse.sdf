@@ -188,11 +188,6 @@
       <pose>12.948908805847168 -0.95515698194503784 1.2651699781417847 0 0 0</pose>
     </include>
     <include>
-      <uri>https://fuel.gazebosim.org/1.0/GoogleResearch/models/Toys_R_Us_Treat_Dispenser_Smart_Puzzle_Foobler</uri>
-      <name>Toys_R_Us_Treat_Dispenser_Smart_Puzzle_Foobler</name>
-      <pose>-3.0470900535583496 1.4461725950241089 0.11981606483459473 -0.027447699820968778 0 0</pose>
-    </include>
-    <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/KitchenCountertop</uri>
       <name>KitchenCountertop</name>
       <pose>14.576556205749512 -1.3052109479904175 0.19535380601882935 0.027427600234594895 0.0010490600189522179 3.1033699984710212</pose>

@@ -87,8 +87,8 @@ class Navigation:
             dx = self.target_point.point.x - current_x
             dy = self.target_point.point.y - current_y
             distance = math.hypot(dx, dy)
-            ARM_REACH_DISTANCE = 0.25 #TODO
-            # Stop 0.3 m before the target
+            ARM_REACH_DISTANCE = 1.0 #TODO
+            # Stop 0.4 m before the target
             if distance > ARM_REACH_DISTANCE:
                 scale = (distance - ARM_REACH_DISTANCE) / distance
                 # Compute yaw angle toward target

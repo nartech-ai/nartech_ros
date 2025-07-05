@@ -1,6 +1,7 @@
 import rclpy
 import time
 import math
+import functools
 from rclpy.node import Node
 from rclpy.duration import Duration
 from geometry_msgs.msg import PoseStamped
@@ -86,25 +87,26 @@ class ArmController:
         if NAV_STATE_GET() == NAV_STATE_BUSY or getattr(self, "holding", False):
             return
         NAV_STATE_SET(NAV_STATE_BUSY)
-
         if not (objectlabel and objectlabel in self.semantic_slam.previous_detections):
             self.node.get_logger().info("arm_controller: Pick failed, object location not observed or remembered")
             NAV_STATE_SET(NAV_STATE_FAIL)
             return
-
         # Remember where the object was last seen (for pick_at).
         (_, _, _, _, _, _, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
         target_point = spoint_base_link.point
         # ---------- Controller tuning constants ----------------------------------
-        yaw_tol   = 0.04       # ± ~2.3 degrees (image plane error)
-        depth_tol = 0.1       # ± 3 cm
-        k_yaw     = 0.1 #0.6        # rad / s per unit x_rel
-        k_fwd     = 0.1 #25       # m / s per metre depth error
-        MIN_ANG = 0.08      # rad / s  → tweak until the robot just starts turning
-        MIN_LIN = 0.04      # m / s
+        GOAL_TARGET_DISTANCE = 0.4
+        yaw_tol   = 0.06       # ± ~2.3 degrees (image plane error)
+        depth_tol = 0.08       # ± 3 cm
+        k_yaw     = 0.3 #0.3 #0.6        # rad / s per unit x_rel
+        k_fwd     = 0.25 #0.2 #25       # m / s per metre depth error
+        MIN_ANG = 0.0 #0.08      # rad / s  → tweak until the robot just starts turning
+        MIN_LIN = 0.1 # #0.04      # m / s
+        CORRECTION_TIMSTEP = 0.5
+        GRIPPER_GRIP_HEIGHT = 0.2 #how much lower the gripper should ideally grab the object due to its dimensions
         # ---------- Internal state -----------------------------------------------
         self.correction_attempts = 0
-        self.max_corrections     = 10
+        self.max_corrections     = 50
         # Publish a zero-velocity command so the base really stops.
         def _stop_motion():
             self.cmd_pub.publish(Twist())
@@ -113,18 +115,31 @@ class ArmController:
         # ---------- Timer callback -----------------------------------------------
         def correction_step():
             # ❶ Abort if the target is gone.
+            move_out = False
             if objectlabel not in self.semantic_slam.previous_detections:
-                self._stop_motion()
+                move_out = True
+            else:
+                t, _, _, _, _, _, spoint_base_link, imagecoords_depth = self.semantic_slam.previous_detections[objectlabel]
+                if time.time() - t > 5.0:
+                    move_out = True
+            if move_out:
+                # ①  Back up 10 cm at −0.10 m/s
+                back_twist = Twist()
+                back_twist.linear.x = -0.1
+                self.cmd_pub.publish(back_twist)
+                # ②  Stop after d / |v|  = 0.10 m / 0.10 m s⁻¹ = 1 s
+                def _after_reverse():
+                    nonlocal reverse_timer
+                    self._stop_motion()
+                    self.node.get_logger().info("arm_controller: Object absent → backed away 10 cm")
+                    NAV_STATE_SET(NAV_STATE_FAIL)
+                    reverse_timer.cancel()       # <- cancel so it fires only once
+                reverse_timer = self.node.create_timer(
+                    1.0,            # seconds
+                    _after_reverse, # callback
+                )
+                # ③  Cancel correction loop so no more cmds are published
                 self.correction_timer.cancel()
-                self.node.get_logger().info("arm_controller: Object absent in semantic map")
-                NAV_STATE_SET(NAV_STATE_FAIL)
-                return
-            (t, _, _, _, _, _, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
-            if time.time() - t > 1.0:
-                self._stop_motion()
-                self.correction_timer.cancel()
-                self.node.get_logger().info("arm_controller: Object lost from observation")
-                NAV_STATE_SET(NAV_STATE_FAIL)
                 return
             x_rel, _, depth = imagecoords_depth
             x_err = (x_rel - 0.5) * 2.0
@@ -136,7 +151,7 @@ class ArmController:
                 if 0 < abs(twist.angular.z) < MIN_ANG:
                     twist.angular.z = math.copysign(MIN_ANG, twist.angular.z)
             # ❸ Forward correction (stop ~40 cm in front of object).
-            depth_error = depth - 0.40
+            depth_error = depth - GOAL_TARGET_DISTANCE
             if depth_error > depth_tol:
                 twist.linear.x = k_fwd * depth_error
                 if 0 < twist.linear.x < MIN_LIN:
@@ -152,7 +167,7 @@ class ArmController:
                 self._stop_motion()
                 self.correction_timer.cancel()
                 self.node.get_logger().info("arm_controller: Aligned and close. Executing pick.")
-                self.pick_at(target_point.x, 0.0, target_point.z)
+                self.pick_at(target_point.x, 0.0, target_point.z - GRIPPER_GRIP_HEIGHT)
                 NAV_STATE_SET(NAV_STATE_SUCCESS)        # optional, if you have it
                 return
             # ❺ Bail out if we’re stuck.
@@ -160,11 +175,11 @@ class ArmController:
             if self.correction_attempts >= self.max_corrections:
                 self._stop_motion()
                 self.correction_timer.cancel()
-                self.node.get_logger().info(
-                    "arm_controller: Too many corrections.")
+                self.node.get_logger().info("arm_controller: Too many corrections.")
                 NAV_STATE_SET(NAV_STATE_FAIL)
+                return
         # ---------- Kick off the periodic controller -----------------------------
-        self.correction_timer = self.node.create_timer(0.5, correction_step)
+        self.correction_timer = self.node.create_timer(CORRECTION_TIMSTEP, correction_step) #wait 0.5 sec
 
     def drop(self):
         if NAV_STATE_GET() == NAV_STATE_BUSY or not self.holding:
