@@ -207,5 +207,11 @@
       <name>table0_1</name>
       <pose>12.776895523071289 -0.89309197664260864 0 0 0 0</pose>
     </include>
+    <include>
+      <uri>file:///home/nartech/nartech_ws/src/nartech_ros/worlds/objects/orangeball</uri>
+      <name>small_sphere</name>
+      <pose>-4.778439998626709 0.86583232879638694 0.23574893772602081 -0.027447699558054563 0 0</pose>
+    </include>
   </world>
 </sdf>
+

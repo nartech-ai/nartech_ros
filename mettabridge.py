@@ -17,7 +17,9 @@ NAV_STATE = NAV_STATE_SUCCESS #"busy", "success" and "fail" (initially set to su
 def NAV_STATE_SET(NAV_STATE_ARG):
     global NAV_STATE
     NAV_STATE = NAV_STATE_ARG
-    return None
+def NAV_STATE_GET():
+    global NAV_STATE
+    return NAV_STATE
 
 class PatternOperation(OperationObject):
     def __init__(self, name, op, unwrap=False, rec=False):
@@ -102,22 +104,28 @@ def space_tick(node = None):
             node.start_navigation_by_moves("up")
         if cmd == "down":
             node.start_navigation_by_moves("down")
+        if cmd == "drop":
+            node.drop()
         if cmd.startswith("(go (coordinates "):
             x_y = cmd.split("(go (coordinates ")[1].split(")")[0]
             x = int(x_y.split(" ")[0])
             y = int(x_y.split(" ")[1])
-            node.start_navigation_to_coordinate((x, y))
+            potential_label = cmd.split("(go (coordinates ")[1].split(")")[1].split(")")[0].strip()
+            node.start_navigation_to_coordinate((x, y), potential_label)
+        if cmd.startswith("(pick "):
+            label = cmd.split("(pick ")[1].split(")")[0]
+            node.pick(label)
         alldetections = deepcopy(node.semantic_slam.previous_detections)
         objects = "("
         if "{SELF}" in node.semantic_slam.previous_detections:
-            (t, object_grid_x, object_grid_y, origin_x, origin_y) = node.semantic_slam.previous_detections["{SELF}"]
+            (t, object_grid_x, object_grid_y, origin_x, origin_y, point_map, point_base_link, imagecoords_depth) = node.semantic_slam.previous_detections["{SELF}"]
             x_y_unknown = BFS_for_nearest_unknown_cell(node.semantic_slam.low_res_grid, node.semantic_slam.new_width, node.semantic_slam.new_height, object_grid_x, object_grid_y)
             if x_y_unknown:
                 (x_unknown,y_unknown) =  x_y_unknown
-                alldetections["unknown"] = (time.time(), x_unknown, y_unknown, origin_x, origin_y)
+                alldetections["unknown"] = (time.time(), x_unknown, y_unknown, origin_x, origin_y, None, None, None)
         print(alldetections)
         for category in alldetections:
-            (t, object_grid_x, object_grid_y, _, __) = alldetections[category]
+            (t, object_grid_x, object_grid_y, origin_x, origin_y, point_map, point_base_link, imagecoords_depth) = alldetections[category]
             SEXP = f"(detection {category} (coordinates {object_grid_x} {object_grid_y}))"
             objects += SEXP
             if category == "{SELF}":

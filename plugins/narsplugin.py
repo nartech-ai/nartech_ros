@@ -41,8 +41,7 @@ def narsplugin_init(runnerinstance):
    (case (nartech.nars.ros (nartech.nars.operation (nartech.nars.tuple ($Command $Content))))
          (((nartech.ros.command $x) (nartech.ros.command $x))
           (Empty (if (> $iteration 1)
-                     (nartech.nars.executehelper (- $iteration 1) ($Command $Content))
-                     ())))))
+                     (nartech.nars.executehelper (- $iteration 1) ($Command $Content)) ())))))
 
 (= (nartech.nars.execute $cycles ($Command $Content))
    (nartech.nars.executehelper $cycles ($Command $Content)))
@@ -50,7 +49,7 @@ def narsplugin_init(runnerinstance):
 ;perceive the seen and remembered objects as percept events
 (= (nartech.nars.perceive $objects)
    (let* (($obj (superpose $objects))
-                ((detection $category (coordinates $x $y)) $obj))
+          ((detection $category (coordinates $x $y)) $obj))
          (superpose ((nartech.nars (AddBeliefEvent (((($x * $y) * $category) --> perceive) (1.0 0.9))))
                      (nartech.nars (Command concurrent))))))
     """)

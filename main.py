@@ -9,6 +9,7 @@ from objectdetection import ObjectDetector
 from localization import Localization
 from semanticslam import SemanticSLAM
 from navigation import Navigation
+from armcontroller import ArmController
 
 class MainNode(Node):
     def __init__(self):
@@ -17,11 +18,16 @@ class MainNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         # Instantiate the helper modules.
+        self.pick = lambda x: None #overridden
+        self.drop = lambda x: None #overridden
         self.object_detector = ObjectDetector(self, self.tf_buffer)
         self.localization = Localization(self, self.tf_buffer)
         self.semantic_slam = SemanticSLAM(self, self.tf_buffer, self.localization, self.object_detector)
         self.navigation = Navigation(self, self.semantic_slam, self.localization)
         self.start_navigation_to_coordinate = self.navigation.start_navigation_to_coordinate
+        self.arm_controller = ArmController(self, self.semantic_slam)
+        self.pick = self.arm_controller.pick
+        self.drop = self.arm_controller.drop
 
 def main(args=None):
     rclpy.init(args=args)

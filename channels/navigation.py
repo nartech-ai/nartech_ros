@@ -1,4 +1,5 @@
 # nav.py
+import sys
 import time
 import math
 import rclpy
@@ -7,6 +8,7 @@ from std_msgs.msg import String
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import Quaternion
 from action_msgs.msg import GoalStatus
 # Assume mettabridge defines these constants and functions:
 from mettabridge import NAV_STATE_SET, NAV_STATE_BUSY, NAV_STATE_SUCCESS, NAV_STATE_FAIL
@@ -39,10 +41,16 @@ class Navigation:
             return
         target_cell = self.get_current_target_cell(command)
         if target_cell:
-            self.start_navigation_to_coordinate(target_cell, command)
+            self.start_navigation_to_coordinate(target_cell, "", command)
 
-    def start_navigation_to_coordinate(self, target_cell, command=""):
-        NAV_STATE_SET(NAV_STATE_BUSY)
+    def start_navigation_to_coordinate(self, target_cell, objectlabel, command=""):
+        self.state = NAV_STATE_SET(NAV_STATE_BUSY)
+        #retrieve current (potentially updated) position estimate
+        self.objectlabel = objectlabel
+        self.target_point = None
+        if objectlabel and objectlabel in self.node.semantic_slam.previous_detections:
+            (t, object_grid_x, object_grid_y, origin_x, origin_y, spoint_map, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
+            self.target_point = spoint_map
         if self.semantic_slam.robot_lowres_x is None:
             return
         self.navigation_goal = (target_cell, command)
@@ -51,7 +59,6 @@ class Navigation:
 
     def send_navigation_goal(self, target_cell, command):
         origin_x, origin_y = self.semantic_slam.origin.position.x, self.semantic_slam.origin.position.y
-        import sys
         if not any(arg.endswith(".metta") for arg in sys.argv) and self.check_collision(target_cell):
             if "," in self.navigation_goal[1]:
                 self.node.get_logger().info("COLLISION, shortening command")
@@ -61,15 +68,43 @@ class Navigation:
             else:
                 self.node.get_logger().info("COLLISION, aborting")
                 self.publish_done(force_mapupdate=False)
-                NAV_STATE_SET(NAV_STATE_FAIL)
+                self.state = NAV_STATE_SET(NAV_STATE_FAIL)
                 return
-        cell_x, cell_y = target_cell
+        cell_x, cell_y = (None, None)
+        if target_cell is not None:
+            cell_x, cell_y = target_cell
         goal_pose = PoseStamped()
         goal_pose.header.frame_id = 'map'
         goal_pose.header.stamp = self.node.get_clock().now().to_msg()
-        goal_pose.pose.position.x = origin_x + (cell_x * self.semantic_slam.new_resolution) + self.semantic_slam.new_resolution / 2
-        goal_pose.pose.position.y = origin_y + (cell_y * self.semantic_slam.new_resolution) + self.semantic_slam.new_resolution / 2
-        goal_pose.pose.orientation = self.localization.set_orientation(command)
+        if target_cell is not None:
+            goal_pose.pose.position.x = origin_x + (cell_x * self.semantic_slam.new_resolution) + self.semantic_slam.new_resolution / 2
+            goal_pose.pose.position.y = origin_y + (cell_y * self.semantic_slam.new_resolution) + self.semantic_slam.new_resolution / 2
+        if self.target_point is not None:
+            # Assume current_pose is your robot’s current position in map frame
+            current_x = self.semantic_slam.trans.transform.translation.x
+            current_y = self.semantic_slam.trans.transform.translation.y
+            # Vector from current position to target
+            dx = self.target_point.point.x - current_x
+            dy = self.target_point.point.y - current_y
+            distance = math.hypot(dx, dy)
+            ARM_REACH_DISTANCE = 0.25 #TODO
+            # Stop 0.3 m before the target
+            if distance > ARM_REACH_DISTANCE:
+                scale = (distance - ARM_REACH_DISTANCE) / distance
+                # Compute yaw angle toward target
+                yaw = math.atan2(dy, dx)
+                # Create quaternion for yaw-only rotation
+                q = Quaternion()
+                q.w = math.cos(yaw / 2.0)
+                q.x = 0.0
+                q.y = 0.0
+                q.z = math.sin(yaw / 2.0)
+                # Set orientation
+                goal_pose.pose.orientation = q
+                goal_pose.pose.position.x = current_x + dx * scale
+                goal_pose.pose.position.y = current_y + dy * scale
+        else:
+            goal_pose.pose.orientation = self.localization.set_orientation(command)
         self.node.get_logger().info(f"Sending goal to ({goal_pose.pose.position.x}, {goal_pose.pose.position.y})")
         if not self.action_client.wait_for_server(timeout_sec=1.0):
             self.node.get_logger().error("Action server not available!")
@@ -96,6 +131,8 @@ class Navigation:
         nav_state = NAV_STATE_SUCCESS
         if result.status == GoalStatus.STATUS_SUCCEEDED:
             self.node.get_logger().info("Goal succeeded!")
+            if self.objectlabel: #orient to object
+                self.start_navigation_to_coordinate(self.navigation_goal[0], self.objectlabel, command="")
         else:
             if self.navigation_retries < 10 and "metta" not in __import__("sys").argv:
                 self.node.get_logger().info("Goal failed with status: {0}, retrying".format(result.status))
@@ -111,7 +148,7 @@ class Navigation:
                 else:
                     self.node.get_logger().info("Goal failed with status: {0}, exhausted retries and shortenings".format(result.status))
         self.publish_done(force_mapupdate=True)
-        NAV_STATE_SET(nav_state)
+        self.state = NAV_STATE_SET(nav_state)
 
     def publish_done(self, force_mapupdate):
         force_mapupdate = False  # as in the original code, map updating is fast so we disable forced waiting
