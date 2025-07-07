@@ -72,8 +72,8 @@ class ArmController:
         # ─── sanitize end-effector target ───────────────────────────────────────
         if y != 0:
             y = 0.0
-        x = min(max(x, 0.2), 0.3)   # clamp 0.2 ≤ x ≤ 0.3
-        z = min(max(z, 0.1), 0.2)   # clamp 0.1 ≤ z ≤ 0.2
+        x = min(max(x, 0.2), 0.23)   # clamp 0.2 ≤ x ≤ 0.23 (z=0.05) # clamp 0.2 ≤ x ≤ 0.3 (z=0.1)
+        z = min(max(z, 0.05), 0.2)   # clamp 0.1 ≤ z ≤ 0.2 (z=0.05)
 
         self.node.get_logger().info(
             f"arm_controller: PICK CORRECTED {x:.2f} {y:.2f} {z:.2f}"
@@ -168,10 +168,10 @@ class ArmController:
         target_point = spoint_base_link.point
 
         # ─── 3. Constants ───────────────────────────────────────────────────────
-        GOAL_TARGET_DISTANCE = 0.4
-        yaw_tol, depth_tol = 0.06, 0.08
-        k_yaw,  k_fwd      = 0.3,  0.1
-        MIN_ANG, MIN_LIN   = 0.0,  0.1
+        GOAL_TARGET_DISTANCE = 0.37
+        yaw_tol, depth_tol = 0.05, 0.02
+        k_yaw,  k_fwd      = 0.3,  0.3
+        MIN_ANG, MIN_LIN   = 0.0,  0.0
         CORRECTION_DT      = 0.5
         GRIPPER_GRIP_HEIGHT = 0.2
 
@@ -191,7 +191,7 @@ class ArmController:
             # ❷ Abort if object missing for >5 s
             if time.time() - t > 5.0:
                 back_twist = Twist()
-                back_twist.linear.x = -0.1
+                back_twist.linear.x = -0.05
                 self.cmd_pub.publish(back_twist)
                 def _after_reverse():
                     nonlocal reverse_timer
@@ -214,7 +214,7 @@ class ArmController:
                 twist.angular.z = -k_yaw * x_err
                 if 0 < abs(twist.angular.z) < MIN_ANG:
                     twist.angular.z = math.copysign(MIN_ANG, twist.angular.z)
-            if depth_err > depth_tol:
+            if abs(depth_err) > depth_tol:
                 twist.linear.x = k_fwd * depth_err
                 if 0 < twist.linear.x < MIN_LIN:
                     twist.linear.x = MIN_LIN
@@ -400,7 +400,7 @@ def main():
     rclpy.init()
     armcontroller = ArmController()
     #self.control_gripper("open")
-    armcontroller.pick_at(0.2, 0.0, 0.1) 
+    armcontroller.pick_at(0.23, 0.0, 0.05)
     end_time = time.time() + 10.0
     while time.time() < end_time and rclpy.ok():
         rclpy.spin_once(armcontroller.node, timeout_sec=0.1)
