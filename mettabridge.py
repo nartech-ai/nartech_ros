@@ -20,6 +20,12 @@ def NAV_STATE_SET(NAV_STATE_ARG):
 def NAV_STATE_GET():
     global NAV_STATE
     return NAV_STATE
+def ARM_STATE_SET(ARM_STATE_ARG):
+    global ARM_STATE
+    ARM_STATE = ARM_STATE_ARG
+def ARM_STATE_GET():
+    global ARM_STATE
+    return ARM_STATE
 
 class PatternOperation(OperationObject):
     def __init__(self, name, op, unwrap=False, rec=False):
@@ -51,6 +57,12 @@ def call_ros_objects(*a):
     parser = SExprParser(objects)
     return parser.parse(tokenizer)
 
+def call_ros_arm(*a):
+    global runner, ARM_STATE
+    tokenizer = runner.tokenizer()
+    parser = SExprParser(ARM_STATE)
+    return parser.parse(tokenizer)
+
 def call_ros_navigation(*a):
     global runner, NAV_STATE
     tokenizer = runner.tokenizer()
@@ -72,6 +84,7 @@ def space_init():
                    $obj)))
     """)
     runner.register_atom("nartech.ros", G(PatternOperation('nartech.ros', wrapnpop(call_ros), unwrap=False)))
+    runner.register_atom("nartech.ros.arm", G(PatternOperation('nartech.ros.arm', wrapnpop(call_ros_arm), unwrap=False)))
     runner.register_atom("nartech.ros.navigation", G(PatternOperation('nartech.ros.navigation', wrapnpop(call_ros_navigation), unwrap=False)))
     runner.register_atom("nartech.ros.objects", G(PatternOperation('nartech.ros.objects', wrapnpop(call_ros_objects), unwrap=False)))
     runner.register_atom("nartech.nars", G(PatternOperation('nartech.nars', wrapnpop(call_nars), unwrap=False)))

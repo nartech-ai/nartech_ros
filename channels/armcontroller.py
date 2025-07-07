@@ -20,12 +20,14 @@ if __name__ == '__main__': #arm test does not need that
     NAV_STATE_BUSY = NAV_STATE_SUCCESS = NAV_STATE_FAIL = 42
     NAV_STATE_SET = lambda x: 42
     NAV_STATE_GET = lambda: 42
+    ARM_STATE_SET = lambda x: 42
+    ARM_STATE_GET = lambda: 42
 else:
-    from mettabridge import NAV_STATE_SET, NAV_STATE_GET, NAV_STATE_BUSY, NAV_STATE_SUCCESS, NAV_STATE_FAIL
+    from mettabridge import NAV_STATE_SET, NAV_STATE_GET, NAV_STATE_BUSY, NAV_STATE_SUCCESS, NAV_STATE_FAIL, ARM_STATE_SET, ARM_STATE_GET
 
 class ArmController:
     def __init__(self, node=None, semantic_slam=None):
-        self.holding = False
+        ARM_STATE_SET("FREE")
         self.semantic_slam = semantic_slam
         if node is None:
             self.own_node = Node('arm_controller')
@@ -232,7 +234,10 @@ class ArmController:
                     "arm_controller: Aligned and close. Executing pick."
                 )
                 def _on_grasp_done(success: bool):
-                    #self.holding = success
+                    if success:
+                        ARM_STATE_SET("HOLDING")
+                    else:
+                        ARM_STATE_SET("FREE")
                     NAV_STATE_SET(NAV_STATE_SUCCESS if success else NAV_STATE_FAIL)
                     self.picking = False
                 self.pick_at(
@@ -254,7 +259,7 @@ class ArmController:
         self.correction_timer = self.node.create_timer(CORRECTION_DT, correction_step)
 
     def drop(self):
-        if NAV_STATE_GET() == NAV_STATE_BUSY or not self.holding:
+        if NAV_STATE_GET() == NAV_STATE_BUSY or ARM_STATE_GET() != "HOLDING": # or not self.holding:
             return
         NAV_STATE_SET(NAV_STATE_BUSY)
         def after_up(_):
@@ -265,7 +270,7 @@ class ArmController:
             self.move_end_effector_to(x=0.15, y=0.0, z=0.3).add_done_callback(after_drop)
         def after_drop(_):
             self.node.get_logger().info("arm_controller: DROP complete")
-            self.holding = False
+            ARM_STATE_SET("FREE")
             NAV_STATE_SET(NAV_STATE_SUCCESS)
         self.move_end_effector_to(x=0.15, y=0.0, z=0.3).add_done_callback(after_up)
 
