@@ -168,7 +168,7 @@ class ArmController:
         target_point = spoint_base_link.point
 
         # ─── 3. Constants ───────────────────────────────────────────────────────
-        GOAL_TARGET_DISTANCE = 0.37
+        GOAL_TARGET_DISTANCE = 0.38 #0.37
         yaw_tol, depth_tol = 0.05, 0.02
         k_yaw,  k_fwd      = 0.3,  0.3
         MIN_ANG, MIN_LIN   = 0.0,  0.0
