@@ -49,6 +49,7 @@ class SemanticSLAM:
         self.origin = None
         self.mapupdate = 0
         self.goalstart = 0
+        self.inventory = []
 
     def occ_grid_callback(self, msg):
         self.node.get_logger().info("NEW OCC GRID")
@@ -90,8 +91,9 @@ class SemanticSLAM:
         if self.robot_lowres_x is not None and 0 <= self.robot_lowres_x < self.new_width and 0 <= self.robot_lowres_y < self.new_height:
             robot_idx = self.robot_lowres_y * self.new_width + self.robot_lowres_x
             self.low_res_grid[robot_idx] = 127  # Mark the robot cell.
-            self.previous_detections["{SELF}"] = (time.time(), self.robot_lowres_x, self.robot_lowres_y,
-                                                  original_origin.position.x, original_origin.position.y, None, None, None)
+            for objectlabel in self.inventory + ["{SELF}"]:
+                self.previous_detections[objectlabel] = (time.time(), self.robot_lowres_x, self.robot_lowres_y,
+                                                         original_origin.position.x, original_origin.position.y, None, None, None)
             self.node.get_logger().info(f"Marked robot position at ({self.robot_lowres_x}, {self.robot_lowres_y}) as occupied.")
         else:
             self.node.get_logger().warn("Robot position is out of bounds in the downsampled map.")

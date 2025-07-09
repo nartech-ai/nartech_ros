@@ -41,6 +41,6 @@
                           ;If already adjacent of coordinate
                           (if (WithinRadius $coordinates $coordSELF 1.0)
                               ;Drop the payload
-                              (nartech.ros (drop))
+                              (nartech.ros drop)
                               ;Else go to last known coordinate
                               (nartech.ros (go $coordinates $label)))))))))

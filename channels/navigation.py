@@ -48,9 +48,9 @@ class Navigation:
         #retrieve current (potentially updated) position estimate
         self.objectlabel = objectlabel
         self.target_point = None
-        if objectlabel and objectlabel in self.node.semantic_slam.previous_detections:
-            (t, object_grid_x, object_grid_y, origin_x, origin_y, spoint_map, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
-            self.target_point = spoint_map
+        #if objectlabel and objectlabel in self.node.semantic_slam.previous_detections:
+        #    (t, object_grid_x, object_grid_y, origin_x, origin_y, spoint_map, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
+        #    self.target_point = spoint_map
         if self.semantic_slam.robot_lowres_x is None:
             return
         self.navigation_goal = (target_cell, command)
@@ -131,8 +131,8 @@ class Navigation:
         nav_state = NAV_STATE_SUCCESS
         if result.status == GoalStatus.STATUS_SUCCEEDED:
             self.node.get_logger().info("Goal succeeded!")
-            if self.objectlabel: #orient to object
-                self.start_navigation_to_coordinate(self.navigation_goal[0], self.objectlabel, command="")
+            #if self.objectlabel: #orient to object
+            #    self.start_navigation_to_coordinate(self.navigation_goal[0], self.objectlabel, command="")
         else:
             if self.navigation_retries < 10 and "metta" not in __import__("sys").argv:
                 self.node.get_logger().info("Goal failed with status: {0}, retrying".format(result.status))

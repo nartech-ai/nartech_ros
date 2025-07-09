@@ -15,6 +15,19 @@ from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Twist
 from rclpy.task import Future
 
+# ─── Approach and grab params ───────────────────────────────────────────────────────
+GOAL_TARGET_DISTANCE = 0.38 #0.37
+yaw_tol, depth_tol = 0.05, 0.02
+k_yaw,  k_fwd      = 0.3,  0.3
+MIN_ANG, MIN_LIN   = 0.0,  0.0
+CORRECTION_DT      = 0.5
+GRIPPER_GRIP_HEIGHT = 0.2
+
+# ── Slip-detection constants ─────────────────────────────────────────────
+GRIPPER_CLOSE_TARGET = -0.01   # value you already use in control_gripper()
+GRIPPER_SLIP_TOL    = 0.002   # ± tolerance around closed angle
+SLIP_CHECK_PERIOD   = 0.2     # seconds between checks
+
 # Assume mettabridge defines these constants and functions:
 if __name__ == '__main__': #arm test does not need that
     NAV_STATE_BUSY = NAV_STATE_SUCCESS = NAV_STATE_FAIL = 42
@@ -49,8 +62,56 @@ class ArmController:
             self.node.get_logger().error("arm_controller action not available")
             rclpy.shutdown()
             return
+        # ── Cache latest /joint_states for slip detection ───────────────────────
+        self._latest_joint_state = None
+        def _joint_state_cb(msg):
+            self._latest_joint_state = msg
+        self._joint_state_sub = self.node.create_subscription(
+            JointState, '/joint_states', _joint_state_cb, 10)
+
+        # ── Start periodic slip-check timer ──────────────────────────────────────
+        self._slip_timer = self.node.create_timer(
+            SLIP_CHECK_PERIOD, self._check_gripper_slip)
+
+        #open the gripper
         self.control_gripper("open")
         self.move_end_effector_to(x=0.15, y=0.0, z=0.3)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Slip detection – opens gripper if it ever reaches fully-closed angle
+    # while we think we're holding something.
+    # ─────────────────────────────────────────────────────────────────────────
+    def _check_gripper_slip(self):
+        if ARM_STATE_GET() == "FREE" or self._latest_joint_state is None:
+            return
+        #update semantic map inventory (object locations move with robot)
+        self.semantic_slam.inventory = [ARM_STATE_GET()]
+        try:
+            li = self._latest_joint_state.name.index('gripper_left_joint')
+            ri = self._latest_joint_state.name.index('gripper_right_joint')
+        except ValueError:
+            return  # joint names not published yet
+
+        l_pos = self._latest_joint_state.position[li]
+        r_pos = self._latest_joint_state.position[ri]
+
+        fully_closed = (
+            l_pos <= GRIPPER_CLOSE_TARGET + GRIPPER_SLIP_TOL and
+            r_pos <= GRIPPER_CLOSE_TARGET + GRIPPER_SLIP_TOL
+        )
+        if not fully_closed:
+            return
+
+        self.node.get_logger().warn(
+            f'arm_controller: Slip detected at {l_pos:+.3f}, {r_pos:+.3f}')
+
+        def after_slip_release(fut):
+            ARM_STATE_SET('FREE')
+            NAV_STATE_SET(NAV_STATE_FAIL)
+
+        NAV_STATE_SET(NAV_STATE_BUSY)          # block nav while recovering
+        self.control_gripper('open').add_done_callback(after_slip_release) # open asynchronously
+        ARM_STATE_SET('WAITING_RELEASE')       # avoid double-trigger
 
     def pick_at(self, x: float, y: float, z: float, *, done_cb=None) -> Future:
         """
@@ -156,27 +217,6 @@ class ArmController:
             self.picking = False
             return
 
-        # ─── 2. Seed variables from the latest detection ───────────────────────
-        (
-            t0,
-            _,
-            _,
-            _,
-            _,
-            _,
-            spoint_base_link,
-            imagecoords_depth,
-        ) = self.semantic_slam.previous_detections[objectlabel]
-        target_point = spoint_base_link.point
-
-        # ─── 3. Constants ───────────────────────────────────────────────────────
-        GOAL_TARGET_DISTANCE = 0.38 #0.37
-        yaw_tol, depth_tol = 0.05, 0.02
-        k_yaw,  k_fwd      = 0.3,  0.3
-        MIN_ANG, MIN_LIN   = 0.0,  0.0
-        CORRECTION_DT      = 0.5
-        GRIPPER_GRIP_HEIGHT = 0.2
-
         self.correction_attempts = 0
         self.max_corrections     = 50
 
@@ -186,12 +226,10 @@ class ArmController:
 
         # ─── 4. Timer callback ─────────────────────────────────────────────────
         def correction_step() -> None:
-            nonlocal target_point, imagecoords_depth  # ★ declare non-local vars
             # ❶ Latest observation (needed *before* any read)
             (t, _, _, _, _, _, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
-            target_point = spoint_base_link.point
             # ❷ Abort if object missing for >5 s
-            if time.time() - t > 5.0:
+            if time.time() - t > 5.0 or spoint_base_link is None:
                 back_twist = Twist()
                 back_twist.linear.x = -0.05
                 self.cmd_pub.publish(back_twist)
@@ -207,6 +245,7 @@ class ArmController:
                 reverse_timer = self.node.create_timer(1.0, _after_reverse)
                 self.correction_timer.cancel()
                 return
+            target_point = spoint_base_link.point
             # ❸ Control law
             x_rel, _, depth = imagecoords_depth
             x_err           = (x_rel - 0.5) * 2.0
@@ -235,7 +274,7 @@ class ArmController:
                 )
                 def _on_grasp_done(success: bool):
                     if success:
-                        ARM_STATE_SET("HOLDING")
+                        ARM_STATE_SET(objectlabel)
                     else:
                         ARM_STATE_SET("FREE")
                     NAV_STATE_SET(NAV_STATE_SUCCESS if success else NAV_STATE_FAIL)
@@ -259,7 +298,7 @@ class ArmController:
         self.correction_timer = self.node.create_timer(CORRECTION_DT, correction_step)
 
     def drop(self):
-        if NAV_STATE_GET() == NAV_STATE_BUSY or ARM_STATE_GET() != "HOLDING": # or not self.holding:
+        if NAV_STATE_GET() == NAV_STATE_BUSY or ARM_STATE_GET() == "FREE": # or not self.holding:
             return
         NAV_STATE_SET(NAV_STATE_BUSY)
         def after_up(_):
