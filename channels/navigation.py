@@ -3,6 +3,7 @@ import sys
 import time
 import math
 import rclpy
+from geometry_msgs.msg import Twist
 from rclpy.node import Node
 from std_msgs.msg import String
 from nav2_msgs.action import NavigateToPose
@@ -28,7 +29,9 @@ class Navigation:
         self.naceop_sub = self.node.create_subscription(String, '/naceop', self.naceop_callback, qos_profile_str)
         self.nacedone_pub = self.node.create_publisher(String, '/nacedone', qos_profile_str)
         self.action_client = ActionClient(self.node, NavigateToPose, 'navigate_to_pose')
+        self.cmd_pub = self.node.create_publisher(Twist, '/cmd_vel', 10)
         self.mettacontrolled = False
+        self._pending_cancel = False
         for arg in sys.argv:
             if arg == "metta" or arg.endswith(".metta"): #we let explicit MeTTa code control the robot
                 self.mettacontrolled = True
@@ -129,6 +132,12 @@ class Navigation:
 
     def _goal_response_callback(self, future):
         self.goal_handle = future.result()
+        if self._pending_cancel:
+            self._pending_cancel = False
+            self.node.get_logger().info("Navigation: late cancel")
+            self.goal_handle.cancel_goal_async()
+            self.publish_done(force_mapupdate=False)
+            return
         if not self.goal_handle.accepted:
             self.goal_handle = None
             self.node.get_logger().info("Goal rejected")
@@ -202,6 +211,9 @@ class Navigation:
         return False
 
     def cancel_goals(self):
+        self._pending_cancel = True
+         # start “brake” timer – 20 Hz zero /cmd_vel
+        self._brake_timer = self.node.create_timer(0.05, lambda: self.cmd_pub.publish(Twist()))
         if not self.action_client.server_is_ready():
             # Action server is not up (simulation paused, early startup, etc.)
             self.node.get_logger().warn("Navigation: Nav2 action server not ready, nothing to cancel")
@@ -217,6 +229,17 @@ class Navigation:
                 self.node.get_logger().info(f"Navigation: cancelled Nav2 goal(s)")
             except Exception as e:  # noqa: BLE001
                 self.node.get_logger().warn(f"Navigation: cancel_all_goals_async failed: {e!r}")
+        def _on_cancel_done(fut):
+            try:
+                fut.result()                       # raises if the cancel failed
+                self.node.get_logger().info("Navigation: cancelled Nav2 goal")
+            except Exception as e:
+                self.node.get_logger().warn(f"Navigation: cancel_goal_async failed: {e!r}")
+            finally:
+                if self._brake_timer:              # stop zero-velocity “brake” stream
+                    self._brake_timer.cancel()
+                    self._brake_timer = None
+                self._pending_cancel = False
         cancel_future.add_done_callback(_on_cancel_done)
     
     

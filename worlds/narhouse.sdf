@@ -105,42 +105,42 @@
     <include>
       <uri>https://fuel.gazebosim.org/1.0/MovAi/models/shelf_big</uri>
       <name>shelf_big_3</name>
-      <pose>3.5 9.5 0 0 0 1.5699999999999998</pose>
+      <pose>3.5 9.5 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/MovAi/models/shelf_big</uri>
       <name>shelf_big_4</name>
-      <pose>-1.3000000000000007 18.5 0 0 0 1.5699999999999998</pose>
+      <pose>-1.3000000000000009 18.5 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/MovAi/models/shelf</uri>
       <name>shelf_0</name>
-      <pose>-10 21.5 0 0 0 1.5699999999999998</pose>
+      <pose>-10 21.5 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/MovAi/models/shelf</uri>
       <name>shelf_1</name>
-      <pose>-6.9999999999999964 23.600000000000001 0 0 0 1.5699999999999998</pose>
+      <pose>-6.9999999999999964 23.600000000000001 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/MovAi/models/shelf</uri>
       <name>shelf_2</name>
-      <pose>-3.9999999999999996 21.5 0 0 0 1.5699999999999998</pose>
+      <pose>-3.9999999999999996 21.5 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Jersey Barrier</uri>
       <name>barrier_0</name>
-      <pose>-10.4 14.75 0 0 0 1.5699999999999998</pose>
+      <pose>-10.4 14.75 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Jersey Barrier</uri>
       <name>barrier_1</name>
-      <pose>-10.4 10.5 0 0 0 1.5699999999999998</pose>
+      <pose>-10.4 10.5 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Jersey Barrier</uri>
       <name>barrier_2</name>
-      <pose>-10.4 6.5 0 0 0 1.5699999999999998</pose>
+      <pose>-10.4 6.5 0 0 0 1.5700000000000001</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Jersey Barrier</uri>
@@ -150,7 +150,7 @@
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Chair</uri>
       <name>chair_0</name>
-      <pose>12.654761314392092 -1.7843409776687615 0 0 0 1.9098299843376183</pose>
+      <pose>12.654761314392092 -1.7843409776687615 0 0 0 1.9098299843376185</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Chair</uri>
@@ -160,7 +160,7 @@
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/foldable_chair</uri>
       <name>fchair_0</name>
-      <pose>-11.5 6.4000000000000004 0 0 0 -1.7999999999999998</pose>
+      <pose>-11.5 6.4000000000000004 0 0 0 -1.8</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/foldable_chair</uri>
@@ -175,7 +175,7 @@
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/MaleVisitorOnPhone</uri>
       <name>Person 1 - Standing</name>
-      <pose>1 -1 0 0 0 1.5699999999999998</pose>
+      <pose>1.0004600286483765 -0.41735100746154785 0 0 0 2.3752790054730681</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/plateau/models/Casual female</uri>
@@ -190,12 +190,12 @@
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/KitchenCountertop</uri>
       <name>KitchenCountertop</name>
-      <pose>14.576556205749512 -1.3052109479904175 0.19535380601882935 0.027427600234594895 0.0010490600189522179 3.1033699984710212</pose>
+      <pose>14.576556205749512 -1.3052109479904175 0.19535380601882935 0.027427600234594895 0.0010490600189522194 3.1033699984710212</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Fridge</uri>
       <name>Fridge</name>
-      <pose>13.813206672668457 1.0629010200500488 0.13033878803253174 -0.017294700258883161 -0.021314600645293169 -0.8890549993008644</pose>
+      <pose>13.813206672668457 1.0629010200500488 0.13033878803253174 -0.017294700258883154 -0.021314600645293183 -0.8890549993008644</pose>
     </include>
     <include>
       <uri>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Table</uri>
@@ -205,8 +205,7 @@
     <include>
       <uri>file:///home/nartech/nartech_ws/src/nartech_ros/worlds/objects/orangeball</uri>
       <name>small_sphere</name>
-      <pose>-4.778439998626709 0.86583232879638694 0.23574893772602081 -0.027447699558054563 0 0</pose>
+      <pose>-7.5318880081176758 -2.5575699806213379 0.32973700761795049 -0.027447699558054563 0 0</pose>
     </include>
   </world>
 </sdf>
-
