@@ -25,10 +25,13 @@ class Navigation:
         qos_profile_str.history = rclpy.qos.QoSHistoryPolicy.KEEP_LAST
         qos_profile_str.durability = rclpy.qos.QoSDurabilityPolicy.TRANSIENT_LOCAL
         qos_profile_str.reliability = rclpy.qos.QoSReliabilityPolicy.RELIABLE
-        self.naceop_sub = self.node.create_subscription(
-            String, '/naceop', self.naceop_callback, qos_profile_str)
+        self.naceop_sub = self.node.create_subscription(String, '/naceop', self.naceop_callback, qos_profile_str)
         self.nacedone_pub = self.node.create_publisher(String, '/nacedone', qos_profile_str)
         self.action_client = ActionClient(self.node, NavigateToPose, 'navigate_to_pose')
+        self.mettacontrolled = False
+        for arg in sys.argv:
+            if arg == "metta" or arg.endswith(".metta"): #we let explicit MeTTa code control the robot
+                self.mettacontrolled = True
 
     def naceop_callback(self, msg):
         self.semantic_slam.goalstart = self.semantic_slam.mapupdate  # capture current map update state
@@ -114,6 +117,15 @@ class Navigation:
         goal_msg.pose = goal_pose
         sent_goal = self.action_client.send_goal_async(goal_msg)
         sent_goal.add_done_callback(self._goal_response_callback)
+         # ── one-shot 20 s watchdog ────────────────────────────────────────
+        if getattr(self, "_nav_timeout_timer", None):
+            self._nav_timeout_timer.cancel()        # clear any previous timer
+        def _nav_timeout_cb():
+            self.node.get_logger().warn("Navigation timeout – cancelling goal")
+            self.cancel_goals()                     # abort Nav2 goals
+            self._nav_timeout_timer.cancel()        # make it one-shot
+        self._nav_timeout_timer = self.node.create_timer(30.0, _nav_timeout_cb)
+        # ──────────────────────────────────────────────────────────────────
 
     def _goal_response_callback(self, future):
         self.goal_handle = future.result()
@@ -134,7 +146,7 @@ class Navigation:
             #if self.objectlabel: #orient to object
             #    self.start_navigation_to_coordinate(self.navigation_goal[0], self.objectlabel, command="")
         else:
-            if self.navigation_retries < 10 and "metta" not in __import__("sys").argv:
+            if self.navigation_retries < 10 and not self.mettacontrolled:
                 self.node.get_logger().info("Goal failed with status: {0}, retrying".format(result.status))
                 self.navigation_retries += 1
                 self.send_navigation_goal(self.navigation_goal[0], self.navigation_goal[1])
@@ -188,3 +200,23 @@ class Navigation:
             self.node.get_logger().info("COLLISION!!!")
             return True
         return False
+
+    def cancel_goals(self):
+        if not self.action_client.server_is_ready():
+            # Action server is not up (simulation paused, early startup, etc.)
+            self.node.get_logger().warn("Navigation: Nav2 action server not ready, nothing to cancel")
+            return
+        # Ask Nav2 to drop every outstanding goal
+        if self.goal_handle is None:
+            self.node.get_logger().info("Navigation: no active Nav2 goal to cancel")
+            return
+        cancel_future = self.goal_handle.cancel_goal_async()
+        def _on_cancel_done(fut):
+            try:
+                res = fut.result()
+                self.node.get_logger().info(f"Navigation: cancelled Nav2 goal(s)")
+            except Exception as e:  # noqa: BLE001
+                self.node.get_logger().warn(f"Navigation: cancel_all_goals_async failed: {e!r}")
+        cancel_future.add_done_callback(_on_cancel_done)
+    
+    

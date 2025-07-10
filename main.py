@@ -25,7 +25,7 @@ class MainNode(Node):
         self.semantic_slam = SemanticSLAM(self, self.tf_buffer, self.localization, self.object_detector)
         self.navigation = Navigation(self, self.semantic_slam, self.localization)
         self.start_navigation_to_coordinate = self.navigation.start_navigation_to_coordinate
-        self.arm_controller = ArmController(self, self.semantic_slam)
+        self.arm_controller = ArmController(self, self.semantic_slam, self.navigation)
         self.pick = self.arm_controller.pick
         self.drop = self.arm_controller.drop
 

@@ -15,18 +15,19 @@ from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Twist
 from rclpy.task import Future
 
-# ─── Approach and grab params ───────────────────────────────────────────────────────
+# Approach and grab params
 GOAL_TARGET_DISTANCE = 0.38 #0.37
 yaw_tol, depth_tol = 0.05, 0.02
 k_yaw,  k_fwd      = 0.3,  0.3
 MIN_ANG, MIN_LIN   = 0.0,  0.0
 CORRECTION_DT      = 0.5
 GRIPPER_GRIP_HEIGHT = 0.2
-
-# ── Slip-detection constants ─────────────────────────────────────────────
-GRIPPER_CLOSE_TARGET = -0.01   # value you already use in control_gripper()
-GRIPPER_SLIP_TOL    = 0.002   # ± tolerance around closed angle
-SLIP_CHECK_PERIOD   = 0.2     # seconds between checks
+# Gripper Open and close angle
+GRIPPER_OPEN_TARGET = 0.019
+GRIPPER_CLOSE_TARGET = -0.01
+# Slip detection params
+GRIPPER_SLIP_TOL    = 0.002   # +- tolerance around closed angle
+SLIP_CHECK_PERIOD   = 0.2     # Seconds between checks
 
 # Assume mettabridge defines these constants and functions:
 if __name__ == '__main__': #arm test does not need that
@@ -39,15 +40,19 @@ else:
     from mettabridge import NAV_STATE_SET, NAV_STATE_GET, NAV_STATE_BUSY, NAV_STATE_SUCCESS, NAV_STATE_FAIL, ARM_STATE_SET, ARM_STATE_GET
 
 class ArmController:
-    def __init__(self, node=None, semantic_slam=None):
+    def __init__(self, node=None, semantic_slam=None, navigation=None):
         ARM_STATE_SET("FREE")
         self.semantic_slam = semantic_slam
+        self.navigation = navigation
+        self.autorecover = True
+        self.objectlabel = None
         if node is None:
             self.own_node = Node('arm_controller')
             self.node = self.own_node
         else:
             self.own_node = None
             self.node = node
+        self.picking = False
         self.cmd_pub = self.node.create_publisher(Twist, '/cmd_vel', 10)
         self.ik_client = self.node.create_client(GetPositionIK, 'compute_ik')
         self.plan_client = self.node.create_client(GetMotionPlan, 'plan_kinematic_path')
@@ -62,24 +67,21 @@ class ArmController:
             self.node.get_logger().error("arm_controller action not available")
             rclpy.shutdown()
             return
-        # ── Cache latest /joint_states for slip detection ───────────────────────
+        # Cache latest /joint_states for slip detection
         self._latest_joint_state = None
         def _joint_state_cb(msg):
             self._latest_joint_state = msg
-        self._joint_state_sub = self.node.create_subscription(
-            JointState, '/joint_states', _joint_state_cb, 10)
-
-        # ── Start periodic slip-check timer ──────────────────────────────────────
-        self._slip_timer = self.node.create_timer(
-            SLIP_CHECK_PERIOD, self._check_gripper_slip)
-
-        #open the gripper
+        self._joint_state_sub = self.node.create_subscription(JointState, '/joint_states', _joint_state_cb, 10)
+        # Start periodic slip-check timer
+        self._slip_timer = self.node.create_timer(SLIP_CHECK_PERIOD, self._check_gripper_slip)
+        # Open the gripper
         self.control_gripper("open")
+        # Move arm to pre-grap position
         self.move_end_effector_to(x=0.15, y=0.0, z=0.3)
 
     # ─────────────────────────────────────────────────────────────────────────
-    # Slip detection – opens gripper if it ever reaches fully-closed angle
-    # while we think we're holding something.
+    # Slip detection: opens gripper if it ever reaches fully-closed angle
+    # while we think we are holding something.
     # ─────────────────────────────────────────────────────────────────────────
     def _check_gripper_slip(self):
         if ARM_STATE_GET() == "FREE" or self._latest_joint_state is None:
@@ -91,140 +93,88 @@ class ArmController:
             ri = self._latest_joint_state.name.index('gripper_right_joint')
         except ValueError:
             return  # joint names not published yet
-
         l_pos = self._latest_joint_state.position[li]
         r_pos = self._latest_joint_state.position[ri]
-
-        fully_closed = (
-            l_pos <= GRIPPER_CLOSE_TARGET + GRIPPER_SLIP_TOL and
-            r_pos <= GRIPPER_CLOSE_TARGET + GRIPPER_SLIP_TOL
-        )
+        fully_closed = (l_pos <= GRIPPER_CLOSE_TARGET + GRIPPER_SLIP_TOL and
+                        r_pos <= GRIPPER_CLOSE_TARGET + GRIPPER_SLIP_TOL)
         if not fully_closed:
             return
-
-        self.node.get_logger().warn(
-            f'arm_controller: Slip detected at {l_pos:+.3f}, {r_pos:+.3f}')
-
+        self.node.get_logger().warn(f'arm_controller: Slip detected at {l_pos:+.3f}, {r_pos:+.3f}')
         def after_slip_release(fut):
             ARM_STATE_SET('FREE')
             NAV_STATE_SET(NAV_STATE_FAIL)
-
-        NAV_STATE_SET(NAV_STATE_BUSY)          # block nav while recovering
+            if self.autorecover:
+                self.pick(self.objectlabel)
+        self.navigation.cancel_goals()
+        NAV_STATE_SET(NAV_STATE_BUSY)                               # block nav while recovering
         self.control_gripper('open').add_done_callback(after_slip_release) # open asynchronously
-        ARM_STATE_SET('WAITING_RELEASE')       # avoid double-trigger
 
     def pick_at(self, x: float, y: float, z: float, *, done_cb=None) -> Future:
-        """
-        Execute an open-approach-grasp-lift sequence.
-
-        Parameters
-        ----------
-        x, y, z : float
-            Desired grasp position in the arm base frame (metres).
-        done_cb : callable, optional
-            Function ``done_cb(success: bool)`` invoked when the sequence finishes.
-
-        Returns
-        -------
-        rclpy.task.Future
-            Resolves to ``True`` on success, ``False`` on failure.
-        """
         # ─── contract object we’ll fulfil at the end ────────────────────────────
         result_future: Future = Future()
-
         # ─── sanitize end-effector target ───────────────────────────────────────
-        if y != 0:
-            y = 0.0
+        if y != 0: y = 0.0
         x = min(max(x, 0.2), 0.23)   # clamp 0.2 ≤ x ≤ 0.23 (z=0.05) # clamp 0.2 ≤ x ≤ 0.3 (z=0.1)
         z = min(max(z, 0.05), 0.2)   # clamp 0.1 ≤ z ≤ 0.2 (z=0.05)
-
-        self.node.get_logger().info(
-            f"arm_controller: PICK CORRECTED {x:.2f} {y:.2f} {z:.2f}"
-        )
-
+        self.node.get_logger().info(f"arm_controller: PICK CORRECTED {x:.2f} {y:.2f} {z:.2f}")
         # ─── common success / failure paths ─────────────────────────────────────
         def _finish(success: bool) -> None:
             if done_cb:
                 try:
                     done_cb(success)
                 except Exception as e:  # noqa: BLE001
-                    self.node.get_logger().warn(
-                        f"arm_controller: done_cb raised {e!r}"
-                    )
+                    self.node.get_logger().warn(f"arm_controller: done_cb raised {e!r}")
             if not result_future.done():
                 result_future.set_result(success)
-
         def _abort(reason: str, exc: BaseException | None = None) -> None:
             msg = f"arm_controller: ABORT – {reason}"
-            if exc:
-                msg += f" ({exc!r})"
+            if exc: msg += f" ({exc!r})"
             self.node.get_logger().error(msg)
             _finish(False)
-
         # ─── async chain helpers (each checks the previous step) ────────────────
         def after_open(fut):
             if fut.exception():
                 return _abort("gripper open failed", fut.exception())
-            self.move_end_effector_to(x=0.15, y=0.0, z=0.3)\
-                .add_done_callback(after_lifted)
-
+            self.move_end_effector_to(x=0.15, y=0.0, z=0.3).add_done_callback(after_lifted)
         def after_lifted(fut):
             if fut.exception():
                 return _abort("pre-lift failed", fut.exception())
-            self.move_end_effector_to(x=x, y=y, z=z)\
-                .add_done_callback(after_descended)
-
+            self.move_end_effector_to(x=x, y=y, z=z).add_done_callback(after_descended)
         def after_descended(fut):
             if fut.exception():
                 return _abort("descend failed", fut.exception())
             self.control_gripper("close").add_done_callback(after_closed)
-
         def after_closed(fut):
             if fut.exception():
                 return _abort("gripper close failed", fut.exception())
-            self.move_end_effector_to(x=0.15, y=0.0, z=0.3)\
-                .add_done_callback(after_final_lift)
-
+            self.move_end_effector_to(x=0.15, y=0.0, z=0.3).add_done_callback(after_final_lift)
         def after_final_lift(fut):
             if fut.exception():
                 return _abort("final lift failed", fut.exception())
             self.node.get_logger().info("arm_controller: DONE")
             _finish(True)
-
         # ─── kick things off ────────────────────────────────────────────────────
         self.control_gripper("open").add_done_callback(after_open)
         return result_future
 
     def pick(self, objectlabel: str) -> None:
-        # ─── 1. Guards ─────────────────────────────────────────────────────────
-        if (
-            NAV_STATE_GET() == NAV_STATE_BUSY
-            or getattr(self, "holding", False)
-            or getattr(self, "picking", False)
-        ):
+        # ─── Guards ─────────────────────────────────────────────────────────────
+        self.objectlabel = objectlabel
+        if NAV_STATE_GET() == NAV_STATE_BUSY or self.picking:
             return
         NAV_STATE_SET(NAV_STATE_BUSY)
         self.picking = True
-
-        if (
-            not objectlabel
-            or objectlabel not in self.semantic_slam.previous_detections
-        ):
-            self.node.get_logger().info(
-                "arm_controller: Pick failed, object location not observed or remembered"
-            )
+        if not objectlabel or objectlabel not in self.semantic_slam.previous_detections:
+            self.node.get_logger().info("arm_controller: Pick failed, object location not observed or remembered")
             NAV_STATE_SET(NAV_STATE_FAIL)
             self.picking = False
             return
-
         self.correction_attempts = 0
         self.max_corrections     = 50
-
+        # Stop all motion
         def _stop_motion():
             self.cmd_pub.publish(Twist())
-        self._stop_motion = _stop_motion
-
-        # ─── 4. Timer callback ─────────────────────────────────────────────────
+        # ─── Timer callback ─────────────────────────────────────────────────────
         def correction_step() -> None:
             # ❶ Latest observation (needed *before* any read)
             (t, _, _, _, _, _, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
@@ -236,9 +186,7 @@ class ArmController:
                 def _after_reverse():
                     nonlocal reverse_timer
                     _stop_motion()
-                    self.node.get_logger().info(
-                        "arm_controller: Object absent → backed away 10 cm"
-                    )
+                    self.node.get_logger().info("arm_controller: Object absent → backed away 5 cm")
                     NAV_STATE_SET(NAV_STATE_FAIL)
                     self.picking = False
                     reverse_timer.cancel()
@@ -260,18 +208,14 @@ class ArmController:
                 if 0 < twist.linear.x < MIN_LIN:
                     twist.linear.x = MIN_LIN
             self.cmd_pub.publish(twist)
-            self.node.get_logger().info(
-                f"Correction {self.correction_attempts + 1} | "
-                f"x_err={x_err:+.2f}, depth={depth:.2f}, "
-                f"cmd=({twist.linear.x:.2f}, {twist.angular.z:.2f})"
-            )
+            self.node.get_logger().info(f"Correction {self.correction_attempts + 1} | "
+                                        f"x_err={x_err:+.2f}, depth={depth:.2f}, "
+                                        f"cmd=({twist.linear.x:.2f}, {twist.angular.z:.2f})")
             # ❹ Converged?
             if abs(x_err) <= yaw_tol and abs(depth_err) <= depth_tol:
                 _stop_motion()
                 self.correction_timer.cancel()
-                self.node.get_logger().info(
-                    "arm_controller: Aligned and close. Executing pick."
-                )
+                self.node.get_logger().info("arm_controller: Aligned and close. Executing pick.")
                 def _on_grasp_done(success: bool):
                     if success:
                         ARM_STATE_SET(objectlabel)
@@ -279,12 +223,7 @@ class ArmController:
                         ARM_STATE_SET("FREE")
                     NAV_STATE_SET(NAV_STATE_SUCCESS if success else NAV_STATE_FAIL)
                     self.picking = False
-                self.pick_at(
-                    target_point.x,
-                    0.0,
-                    target_point.z - GRIPPER_GRIP_HEIGHT,
-                    done_cb=_on_grasp_done,
-                )
+                self.pick_at(target_point.x, 0.0, target_point.z - GRIPPER_GRIP_HEIGHT, done_cb=_on_grasp_done)
                 return
             # ❺ Bail-out if stuck
             self.correction_attempts += 1
@@ -294,11 +233,11 @@ class ArmController:
                 self.node.get_logger().info("arm_controller: Too many corrections.")
                 NAV_STATE_SET(NAV_STATE_FAIL)
                 self.picking = False
-        # ─── 5. Start periodic controller ──────────────────────────────────────
+        # ─────────── Start periodic controller ──────────────────────────────────────
         self.correction_timer = self.node.create_timer(CORRECTION_DT, correction_step)
 
     def drop(self):
-        if NAV_STATE_GET() == NAV_STATE_BUSY or ARM_STATE_GET() == "FREE": # or not self.holding:
+        if NAV_STATE_GET() == NAV_STATE_BUSY or ARM_STATE_GET() == "FREE":
             return
         NAV_STATE_SET(NAV_STATE_BUSY)
         def after_up(_):
@@ -375,10 +314,6 @@ class ArmController:
                     jc = JointConstraint()
                     jc.joint_name = j
                     jc.position = pos
-                    #if j == "joint1":
-                    #    jc.tolerance_above = 0.1  # allow full ±180° yaw
-                    #    jc.tolerance_below = 0.1
-                    #else:
                     jc.tolerance_above = 0.01
                     jc.tolerance_below = 0.01
                     jc.weight = 1.0
@@ -408,9 +343,7 @@ class ArmController:
                             self.node.get_logger().error("arm_controller: Trajectory rejected by arm_controller")
                             future.set_result(False)
                             return
-                        goal_handle.get_result_async().add_done_callback(
-                            lambda res_fut: future.set_result(True)
-                        )
+                        goal_handle.get_result_async().add_done_callback(lambda res_fut: future.set_result(True))
                     self.arm_client.send_goal_async(goal_msg).add_done_callback(after_traj)
                 self.plan_client.call_async(req).add_done_callback(after_plan)
             self.ik_client.call_async(ik_req).add_done_callback(after_ik)
@@ -421,7 +354,7 @@ class ArmController:
         future = rclpy.task.Future()
         open_gripper = command == "open"
         self.node.get_logger().info("arm_controller: Gripper open=" + str(open_gripper))
-        position = 0.019 if open_gripper else -0.01
+        position = GRIPPER_OPEN_TARGET if open_gripper else GRIPPER_CLOSE_TARGET
         goal_msg = FollowJointTrajectory.Goal()
         goal_msg.trajectory.joint_names = ['gripper_left_joint', 'gripper_right_joint']
         point = JointTrajectoryPoint()
@@ -434,28 +367,17 @@ class ArmController:
                 self.node.get_logger().error('arm_controller: Gripper goal rejected')
                 future.set_result(False)
                 return
-            goal_handle.get_result_async().add_done_callback(
-                lambda res_fut: future.set_result(True)
-            )
+            goal_handle.get_result_async().add_done_callback(lambda res_fut: future.set_result(True))
         self.gripper_client.send_goal_async(goal_msg).add_done_callback(goal_sent_cb)
         return future
 
 def main():
     rclpy.init()
     armcontroller = ArmController()
-    #self.control_gripper("open")
     armcontroller.pick_at(0.23, 0.0, 0.05)
     end_time = time.time() + 10.0
     while time.time() < end_time and rclpy.ok():
         rclpy.spin_once(armcontroller.node, timeout_sec=0.1)
-    #armcontroller.control_gripper("open")
-    #armcontroller.move_end_effector_to(x=0.15, y=0.0, z=0.3)
-    #armcontroller.move_end_effector_to(x=0.15, y=0.0, z=0.2)
-    #armcontroller.control_gripper("close")
-    #armcontroller.move_end_effector_to(x=0.15, y=0.0, z=0.3)
-    #armcontroller.move_end_effector_to(x=0.15, y=0.0, z=0.2)
-    #armcontroller.control_gripper("open")
-    #armcontroller.move_end_effector_to(x=0.15, y=0.0, z=0.3)
     rclpy.shutdown()
 
 if __name__ == '__main__':
