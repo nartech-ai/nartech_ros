@@ -158,7 +158,7 @@ class Navigation:
             #if self.objectlabel: #orient to object
             #    self.start_navigation_to_coordinate(self.navigation_goal[0], self.objectlabel, command="")
         else:
-            if self.navigation_retries < 10 and not self.mettacontrolled:
+            if self.navigation_retries < 10: # and not self.mettacontrolled:
                 self.node.get_logger().info("Goal failed with status: {0}, retrying".format(result.status))
                 self.navigation_retries += 1
                 self.send_navigation_goal(self.navigation_goal[0], self.navigation_goal[1])
@@ -221,6 +221,7 @@ class Navigation:
 
     def cancel_goals(self):
         self._pending_cancel = True
+        self.navigation_retries = 10
          # start “brake” timer – 20 Hz zero /cmd_vel
         self._brake_timer = self.node.create_timer(0.05, lambda: self.cmd_pub.publish(Twist()))
         if not self.action_client.server_is_ready():
@@ -251,5 +252,3 @@ class Navigation:
                     self._brake_timer.cancel()
                     self._brake_timer = None
         cancel_future.add_done_callback(_on_cancel_done)
-    
-    
