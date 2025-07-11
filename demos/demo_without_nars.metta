@@ -10,7 +10,7 @@
 (= (Step $stepTime $realTime)
    ;If navigation not currently busy
    (if (== (nartech.ros.navigation) BUSY)
-       (navigation stack busy)
+       (robot movement busy)
        ;Retrieve objects from semantic map and filter people and unknown locations
        (let* (($objects  (nartech.ros.objects))
               ($bringLabel frisbee)

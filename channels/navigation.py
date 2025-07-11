@@ -12,7 +12,7 @@ from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import Quaternion
 from action_msgs.msg import GoalStatus
 # Assume mettabridge defines these constants and functions:
-from mettabridge import NAV_STATE_SET, NAV_STATE_BUSY, NAV_STATE_SUCCESS, NAV_STATE_FAIL
+from mettabridge import NAV_STATE_SET, NAV_STATE_GET, NAV_STATE_BUSY, NAV_STATE_SUCCESS, NAV_STATE_FAIL
 
 class Navigation:
     def __init__(self, node: Node, semantic_slam, localization):
@@ -65,7 +65,7 @@ class Navigation:
 
     def send_navigation_goal(self, target_cell, command):
         origin_x, origin_y = self.semantic_slam.origin.position.x, self.semantic_slam.origin.position.y
-        if not any(arg.endswith(".metta") for arg in sys.argv) and self.check_collision(target_cell):
+        if not self.mettacontrolled and self.check_collision(target_cell):
             if "," in self.navigation_goal[1]:
                 self.node.get_logger().info("COLLISION, shortening command")
                 newcommand = ",".join(self.navigation_goal[1].split(",")[1:])
@@ -136,12 +136,15 @@ class Navigation:
             self._pending_cancel = False
             self.node.get_logger().info("Navigation: late cancel")
             self.goal_handle.cancel_goal_async()
+            self.goal_handle = None
             self.publish_done(force_mapupdate=False)
+            self.state = NAV_STATE_SET(NAV_STATE_FAIL)
             return
         if not self.goal_handle.accepted:
             self.goal_handle = None
             self.node.get_logger().info("Goal rejected")
             self.publish_done(force_mapupdate=False)
+            self.state = NAV_STATE_SET(NAV_STATE_FAIL)
             return
         self.node.get_logger().info("Goal accepted, waiting for result")
         result_future = self.goal_handle.get_result_async()
@@ -167,9 +170,15 @@ class Navigation:
                     self.start_navigation_by_moves(newcommand)
                     return
                 else:
+                    nav_state = NAV_STATE_FAIL
                     self.node.get_logger().info("Goal failed with status: {0}, exhausted retries and shortenings".format(result.status))
         self.publish_done(force_mapupdate=True)
-        self.state = NAV_STATE_SET(nav_state)
+        self.goal_handle = None
+        if self._pending_cancel:
+            self.node.get_logger().info("Suppressing NAV_STATE update due to pending cancel (e.g. from slip)")
+            self._pending_cancel = False  # clear it now
+        else:
+            self.state = NAV_STATE_SET(nav_state)
 
     def publish_done(self, force_mapupdate):
         force_mapupdate = False  # as in the original code, map updating is fast so we disable forced waiting
@@ -217,29 +226,30 @@ class Navigation:
         if not self.action_client.server_is_ready():
             # Action server is not up (simulation paused, early startup, etc.)
             self.node.get_logger().warn("Navigation: Nav2 action server not ready, nothing to cancel")
+            if self._brake_timer:
+                self._brake_timer.cancel()
+                self._brake_timer = None
+                self._pending_cancel = False
             return
         # Ask Nav2 to drop every outstanding goal
         if self.goal_handle is None:
             self.node.get_logger().info("Navigation: no active Nav2 goal to cancel")
+            if self._brake_timer:
+                self._brake_timer.cancel()
+                self._brake_timer = None
+            self._pending_cancel = False
             return
         cancel_future = self.goal_handle.cancel_goal_async()
         def _on_cancel_done(fut):
             try:
-                res = fut.result()
-                self.node.get_logger().info(f"Navigation: cancelled Nav2 goal(s)")
-            except Exception as e:  # noqa: BLE001
-                self.node.get_logger().warn(f"Navigation: cancel_all_goals_async failed: {e!r}")
-        def _on_cancel_done(fut):
-            try:
-                fut.result()                       # raises if the cancel failed
+                fut.result()
                 self.node.get_logger().info("Navigation: cancelled Nav2 goal")
             except Exception as e:
                 self.node.get_logger().warn(f"Navigation: cancel_goal_async failed: {e!r}")
             finally:
-                if self._brake_timer:              # stop zero-velocity “brake” stream
+                if self._brake_timer:
                     self._brake_timer.cancel()
                     self._brake_timer = None
-                self._pending_cancel = False
         cancel_future.add_done_callback(_on_cancel_done)
     
     

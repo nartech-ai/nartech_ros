@@ -19,7 +19,6 @@ from rclpy.task import Future
 GOAL_TARGET_DISTANCE = 0.38 #0.37
 yaw_tol, depth_tol = 0.05, 0.02
 k_yaw,  k_fwd      = 0.3,  0.3
-MIN_ANG, MIN_LIN   = 0.0,  0.0
 CORRECTION_DT      = 0.5
 GRIPPER_GRIP_HEIGHT = 0.2
 # Gripper Open and close angle
@@ -44,7 +43,6 @@ class ArmController:
         ARM_STATE_SET("FREE")
         self.semantic_slam = semantic_slam
         self.navigation = navigation
-        self.autorecover = True
         self.objectlabel = None
         if node is None:
             self.own_node = Node('arm_controller')
@@ -100,14 +98,10 @@ class ArmController:
         if not fully_closed:
             return
         self.node.get_logger().warn(f'arm_controller: Slip detected at {l_pos:+.3f}, {r_pos:+.3f}')
-        def after_slip_release(fut):
-            ARM_STATE_SET('FREE')
-            NAV_STATE_SET(NAV_STATE_FAIL)
-            if self.autorecover:
-                self.pick(self.objectlabel)
+        ARM_STATE_SET("FREE")
         self.navigation.cancel_goals()
-        NAV_STATE_SET(NAV_STATE_BUSY)                               # block nav while recovering
-        self.control_gripper('open').add_done_callback(after_slip_release) # open asynchronously
+        NAV_STATE_SET(NAV_STATE_FAIL)                               # block nav while recovering
+        self.control_gripper('open')
 
     def pick_at(self, x: float, y: float, z: float, *, done_cb=None) -> Future:
         # ─── contract object we’ll fulfil at the end ────────────────────────────
@@ -157,16 +151,21 @@ class ArmController:
         self.control_gripper("open").add_done_callback(after_open)
         return result_future
 
-    def pick(self, objectlabel: str) -> None:
+    def pick(self, objectlabel: str, recover=False) -> None:
         # ─── Guards ─────────────────────────────────────────────────────────────
         self.objectlabel = objectlabel
-        if NAV_STATE_GET() == NAV_STATE_BUSY or self.picking:
-            return
+        if not recover:
+            if NAV_STATE_GET() == NAV_STATE_BUSY or self.picking:
+                return
+        else:
+            if self.picking:
+                self.node.get_logger().warn("arm_controller: Recovering, but pick already in progress")
+                return
         NAV_STATE_SET(NAV_STATE_BUSY)
         self.picking = True
         if not objectlabel or objectlabel not in self.semantic_slam.previous_detections:
             self.node.get_logger().info("arm_controller: Pick failed, object location not observed or remembered")
-            NAV_STATE_SET(NAV_STATE_FAIL)
+            ARM_STATE_SET("FREE"); NAV_STATE_SET(NAV_STATE_FAIL)
             self.picking = False
             return
         self.correction_attempts = 0
@@ -187,7 +186,7 @@ class ArmController:
                     nonlocal reverse_timer
                     _stop_motion()
                     self.node.get_logger().info("arm_controller: Object absent → backed away 5 cm")
-                    NAV_STATE_SET(NAV_STATE_FAIL)
+                    ARM_STATE_SET("FREE"); NAV_STATE_SET(NAV_STATE_FAIL)
                     self.picking = False
                     reverse_timer.cancel()
                 reverse_timer = self.node.create_timer(1.0, _after_reverse)
@@ -201,12 +200,8 @@ class ArmController:
             twist = Twist()
             if abs(x_err) > yaw_tol:
                 twist.angular.z = -k_yaw * x_err
-                if 0 < abs(twist.angular.z) < MIN_ANG:
-                    twist.angular.z = math.copysign(MIN_ANG, twist.angular.z)
             if abs(depth_err) > depth_tol:
                 twist.linear.x = k_fwd * depth_err
-                if 0 < twist.linear.x < MIN_LIN:
-                    twist.linear.x = MIN_LIN
             self.cmd_pub.publish(twist)
             self.node.get_logger().info(f"Correction {self.correction_attempts + 1} | "
                                         f"x_err={x_err:+.2f}, depth={depth:.2f}, "
@@ -231,8 +226,9 @@ class ArmController:
                 _stop_motion()
                 self.correction_timer.cancel()
                 self.node.get_logger().info("arm_controller: Too many corrections.")
-                NAV_STATE_SET(NAV_STATE_FAIL)
+                ARM_STATE_SET("FREE"); NAV_STATE_SET(NAV_STATE_FAIL)
                 self.picking = False
+                return
         # ─────────── Start periodic controller ──────────────────────────────────────
         self.correction_timer = self.node.create_timer(CORRECTION_DT, correction_step)
 
