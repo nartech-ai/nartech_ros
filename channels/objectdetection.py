@@ -11,6 +11,7 @@ from rclpy.time import Time
 
 class ObjectDetector:
     def __init__(self, node: Node, tf_buffer):
+        self.minconf = 0.1
         self.node = node
         self.tf_buffer = tf_buffer  # (not used directly here but available for later extensions)
         self.bridge = CvBridge()
@@ -64,7 +65,7 @@ class ObjectDetector:
                 scores = detection[5:]
                 class_id = int(np.argmax(scores))
                 confidence = scores[class_id]
-                if confidence > 0.1:  # Adjust threshold as needed
+                if confidence > self.minconf:  # Adjust threshold as needed
                     center_x = int(detection[0] * self.width)
                     center_y = int(detection[1] * self.height)
                     w = int(detection[2] * self.width)
