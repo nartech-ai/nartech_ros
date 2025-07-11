@@ -231,6 +231,7 @@ class Navigation:
                 self._brake_timer.cancel()
                 self._brake_timer = None
                 self._pending_cancel = False
+            self.state = NAV_STATE_SET(NAV_STATE_FAIL)
             return
         # Ask Nav2 to drop every outstanding goal
         if self.goal_handle is None:
@@ -239,6 +240,7 @@ class Navigation:
                 self._brake_timer.cancel()
                 self._brake_timer = None
             self._pending_cancel = False
+            self.state = NAV_STATE_SET(NAV_STATE_FAIL)
             return
         cancel_future = self.goal_handle.cancel_goal_async()
         def _on_cancel_done(fut):
@@ -251,4 +253,5 @@ class Navigation:
                 if self._brake_timer:
                     self._brake_timer.cancel()
                     self._brake_timer = None
+                self.state = NAV_STATE_SET(NAV_STATE_FAIL)
         cancel_future.add_done_callback(_on_cancel_done)

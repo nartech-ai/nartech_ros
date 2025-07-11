@@ -156,10 +156,12 @@ class ArmController:
         self.objectlabel = objectlabel
         if not recover:
             if NAV_STATE_GET() == NAV_STATE_BUSY or self.picking:
+                NAV_STATE_SET(NAV_STATE_FAIL)
                 return
         else:
             if self.picking:
                 self.node.get_logger().warn("arm_controller: Recovering, but pick already in progress")
+                NAV_STATE_SET(NAV_STATE_FAIL)
                 return
         NAV_STATE_SET(NAV_STATE_BUSY)
         self.picking = True
@@ -180,12 +182,12 @@ class ArmController:
             # ❷ Abort if object missing for >5 s
             if time.time() - t > 5.0 or spoint_base_link is None:
                 back_twist = Twist()
-                back_twist.linear.x = -0.20
+                back_twist.linear.x = -0.15
                 self.cmd_pub.publish(back_twist)
                 def _after_reverse():
                     nonlocal reverse_timer
                     _stop_motion()
-                    self.node.get_logger().info("arm_controller: Object absent → backed away 20 cm")
+                    self.node.get_logger().info("arm_controller: Object absent → backed away 15 cm")
                     ARM_STATE_SET("FREE"); NAV_STATE_SET(NAV_STATE_FAIL)
                     self.picking = False
                     reverse_timer.cancel()
