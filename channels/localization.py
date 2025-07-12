@@ -5,6 +5,7 @@ from rclpy.duration import Duration
 from rclpy.time import Time
 import tf2_ros
 from geometry_msgs.msg import Quaternion
+from rclpy.time import Time
 
 class Localization:
     def __init__(self, node, tf_buffer):
@@ -16,7 +17,7 @@ class Localization:
             trans = self.tf_buffer.lookup_transform(
                 'map',
                 'base_link',
-                rclpy.time.Time(),
+                Time(),
                 timeout=Duration(seconds=1.0)
             )
             robot_x = trans.transform.translation.x

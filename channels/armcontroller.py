@@ -155,7 +155,7 @@ class ArmController:
         # ─── Guards ─────────────────────────────────────────────────────────────
         self.objectlabel = objectlabel
         if not recover:
-            if NAV_STATE_GET() == NAV_STATE_BUSY or self.picking:
+            if NAV_STATE_GET() == NAV_STATE_BUSY or self.picking or ARM_STATE_GET() != "FREE":
                 NAV_STATE_SET(NAV_STATE_FAIL)
                 return
         else:

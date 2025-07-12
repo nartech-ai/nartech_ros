@@ -29,7 +29,7 @@
           <!-- Contact stiffness / damping; prevents ratcheting -->
           <contact>
             <ode>
-              <kp>1.0e5</kp>
+              <kp>1.0e6</kp>
               <kd>1.0e3</kd>  <!-- ≈1 % of kp -->
               <min_depth>0.001</min_depth>
             </ode>
@@ -38,8 +38,8 @@
           <!-- 2‑D friction (static & dynamic) -->
           <friction>
             <ode>
-              <mu>2.5</mu>
-              <mu2>2.5</mu2>
+              <mu>5.0</mu>
+              <mu2>5.0</mu2>
 
               <!-- Torsional / rolling resistance -->
               <torsional>
