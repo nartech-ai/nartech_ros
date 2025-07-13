@@ -120,9 +120,8 @@ class SemanticSLAM:
                         if depth_value > 0 and category in self.M:
                             self.node.get_logger().info(f"DEPTH DEBUG: {depth_value}")
                             # Create a point in camera coordinates.
-                            latest_common_time = self.tf_buffer.lookup_transform('map', 'oakd_left_camera_frame', Time()).header.stamp
                             camera_point = PointStamped(
-                                header=Header(stamp=latest_common_time, frame_id='oakd_left_camera_frame'),
+                                header=Header(stamp=Time().to_msg(), frame_id='oakd_left_camera_frame'),
                                 point=Point(
                                     x=depth_value,
                                     y=-(center_x - (self.object_detector.width / 2)) * depth_value / self.object_detector.fx,
@@ -131,7 +130,9 @@ class SemanticSLAM:
                             )
                             try:
                                 # Transform the point into the map frame.
+                                camera_point.header.stamp = Time().to_msg()
                                 transformed_point_map = self.tf_buffer.transform(camera_point, 'map', timeout=Duration(seconds=1.0))
+                                camera_point.header.stamp = Time().to_msg()
                                 transformed_point_base_link = self.tf_buffer.transform(camera_point, 'base_link', timeout=Duration(seconds=1.0))
                                 object_grid_x, object_grid_y = self.get_lowres_position(
                                     transformed_point_map.point.x, transformed_point_map.point.y,
