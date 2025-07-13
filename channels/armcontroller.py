@@ -178,11 +178,23 @@ class ArmController:
         # ─── Timer callback ─────────────────────────────────────────────────────
         def correction_step() -> None:
             # ❶ Latest observation (needed *before* any read)
-            (t, _, _, _, _, _, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
+            (t, _, _, _, _, spoint_map, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
             # ❷ Abort if object missing for >5 s
             if time.time() - t > 5.0 or spoint_base_link is None:
                 back_twist = Twist()
                 back_twist.linear.x = -0.15
+                try:
+                    tf = self.navigation.localization.tf_buffer.lookup_transform('map', 'base_link', Time(), timeout=Duration(seconds=1.0))
+                    # robot pose in map
+                    rx, ry = tf.transform.translation.x, tf.transform.translation.y
+                    yaw = yaw_from_quat(tf.transform.rotation)
+                    # angle robot -> object in map
+                    dx, dy = spoint_map.point.x - rx, spoint_map.point.y - ry
+                    angle  = math.atan2(dy, dx) - yaw
+                    angle  = (angle + math.pi) % (2 * math.pi) - math.pi
+                    back_twist.angular.z = k_yaw * angle
+                except Exception as e:
+                    self.node.get_logger().warn(f"TF lookup map to base_link for improved backing away failed: {e}")
                 self.cmd_pub.publish(back_twist)
                 def _after_reverse():
                     nonlocal reverse_timer
