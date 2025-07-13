@@ -14,6 +14,7 @@ from std_srvs.srv import Empty
 from control_msgs.action import FollowJointTrajectory
 from geometry_msgs.msg import Twist
 from rclpy.task import Future
+from rclpy.time import Time
 
 # Approach and grab params
 GOAL_TARGET_DISTANCE = 0.38 #0.37
@@ -21,6 +22,9 @@ yaw_tol, depth_tol = 0.05, 0.02
 k_yaw,  k_fwd      = 0.3,  0.3
 CORRECTION_DT      = 0.5
 GRIPPER_GRIP_HEIGHT = 0.2
+BACK_SPEED  = -0.15   # m/s   ( ≈0.75 m in 5 s )
+BACKUP_SEC  = 5.0     # how long to back up
+BACKUP_PUB_DT      = 0.1     # resend velocity at 10 Hz
 # Gripper Open and close angle
 GRIPPER_OPEN_TARGET = 0.019
 GRIPPER_CLOSE_TARGET = -0.01
@@ -175,14 +179,24 @@ class ArmController:
         # Stop all motion
         def _stop_motion():
             self.cmd_pub.publish(Twist())
+        # Return yaw (rotation about Z) from geometry_msgs.msg.Quaternion.
+        def yaw_from_quat(q):
+            # q = (x, y, z, w)
+            s = 2.0 * (q.w * q.z + q.x * q.y)
+            c = 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+            return math.atan2(s, c)
         # ─── Timer callback ─────────────────────────────────────────────────────
         def correction_step() -> None:
+            # ─── guard: if a backup is already running, do nothing ───
+            if getattr(self, "_backup_in_progress", False):
+                return
             # ❶ Latest observation (needed *before* any read)
             (t, _, _, _, _, spoint_map, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
             # ❷ Abort if object missing for >5 s
             if time.time() - t > 5.0 or spoint_base_link is None:
+                self._backup_in_progress = True
                 back_twist = Twist()
-                back_twist.linear.x = -0.15
+                back_twist.linear.x = BACK_SPEED
                 try:
                     tf = self.navigation.localization.tf_buffer.lookup_transform('map', 'base_link', Time(), timeout=Duration(seconds=1.0))
                     # robot pose in map
@@ -190,20 +204,23 @@ class ArmController:
                     yaw = yaw_from_quat(tf.transform.rotation)
                     # angle robot -> object in map
                     dx, dy = spoint_map.point.x - rx, spoint_map.point.y - ry
-                    angle  = math.atan2(dy, dx) - yaw
-                    angle  = (angle + math.pi) % (2 * math.pi) - math.pi
+                    angle = (math.atan2(dy, dx) - yaw + math.pi) % (2*math.pi) - math.pi
                     back_twist.angular.z = k_yaw * angle
                 except Exception as e:
                     self.node.get_logger().warn(f"TF lookup map to base_link for improved backing away failed: {e}")
-                self.cmd_pub.publish(back_twist)
+                # ── keep publishing the same twist for the entire backup window ──
+                pub_timer = self.node.create_timer(BACKUP_PUB_DT, lambda: self.cmd_pub.publish(back_twist))
                 def _after_reverse():
-                    nonlocal reverse_timer
                     _stop_motion()
-                    self.node.get_logger().info("arm_controller: Object absent → backed away 15 cm")
+                    pub_timer.cancel()
+                    self.node.get_logger().info(f"arm_controller: Object absent → backed away "
+                                                f"{abs(BACK_SPEED)*BACKUP_SEC:.2f} m")
                     ARM_STATE_SET("FREE"); NAV_STATE_SET(NAV_STATE_FAIL)
                     self.picking = False
-                    reverse_timer.cancel()
-                reverse_timer = self.node.create_timer(1.0, _after_reverse)
+                    reverse_timer.cancel()          # stop this one-shot timer too
+                    self._backup_in_progress = False
+                reverse_timer = self.node.create_timer(BACKUP_SEC, _after_reverse)
+                # end this pick attempt; next one will create a new correction_timer
                 self.correction_timer.cancel()
                 return
             target_point = spoint_base_link.point
