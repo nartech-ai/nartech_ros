@@ -197,8 +197,8 @@ class ArmController:
                 self._backup_in_progress = True
                 back_twist = Twist()
                 back_twist.linear.x = BACK_SPEED
-                try:
-                    tf = self.navigation.localization.tf_buffer.lookup_transform('map', 'base_link', Time(), timeout=Duration(seconds=1.0))
+                try:  #don't wait for optional transform (is fluently incorporated whenver ready)
+                    tf = self.navigation.localization.tf_buffer.lookup_transform('map', 'base_link', Time(), timeout=Duration(seconds=0.0))
                     # robot pose in map
                     rx, ry = tf.transform.translation.x, tf.transform.translation.y
                     yaw = yaw_from_quat(tf.transform.rotation)
