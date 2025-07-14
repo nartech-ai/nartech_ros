@@ -24,3 +24,16 @@ gripper_controller:
     joints: ["gripper_left_joint", "gripper_right_joint"]
     command_interfaces: ["position"]
     state_interfaces: ["position", "velocity"]
+    gains:
+          gripper_left_joint:
+            p: 100.0
+            d: 5.0
+            i: 2.0
+            i_max: 10.0
+            i_min: -10.0
+          gripper_right_joint:
+            p: 100.0
+            d: 5.0
+            i: 2.0
+            i_max: 10.0
+            i_min: -10.0
