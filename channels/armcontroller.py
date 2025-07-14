@@ -19,7 +19,7 @@ from rclpy.time import Time
 # Approach and grab params
 GOAL_TARGET_DISTANCE = 0.38 #0.37
 yaw_tol, depth_tol = 0.05, 0.02
-k_yaw,  k_fwd      = 0.3,  0.2
+k_yaw,  k_fwd      = 0.3,  0.3
 CORRECTION_DT      = 0.5
 GRIPPER_GRIP_HEIGHT = 0.2
 BACKUP_SPEED  = -0.1          # m/s
@@ -160,6 +160,7 @@ class ArmController:
         if not recover:
             if NAV_STATE_GET() == NAV_STATE_BUSY or self.picking or ARM_STATE_GET() != "FREE":
                 NAV_STATE_SET(NAV_STATE_FAIL)
+                self.node.get_logger().info("arm_controller: Pick skipped, already in progress or arm not free")
                 return
         else:
             if self.picking:
@@ -216,16 +217,14 @@ class ArmController:
                 return
             target_point = spoint_base_link.point
             # ❸ Control law
-            age = time.time() - t
-            w   = max(0.0, 1.0 - age / BACKUP_LOSSTIME)
             x_rel, _, depth = imagecoords_depth
             x_err           = (x_rel - 0.5) * 2.0
             depth_err       = depth - GOAL_TARGET_DISTANCE
             twist = Twist()
             if abs(x_err) > yaw_tol:
-                twist.angular.z = -k_yaw * x_err * w
+                twist.angular.z = -k_yaw * x_err
             if abs(depth_err) > depth_tol:
-                twist.linear.x = k_fwd * depth_err * w
+                twist.linear.x = k_fwd * depth_err
             self.cmd_pub.publish(twist)
             self.node.get_logger().info(f"Correction {self.correction_attempts + 1} | "
                                         f"x_err={x_err:+.2f}, depth={depth:.2f}, "

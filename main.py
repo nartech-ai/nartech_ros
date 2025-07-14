@@ -10,13 +10,15 @@ from localization import Localization
 from semanticslam import SemanticSLAM
 from navigation import Navigation
 from armcontroller import ArmController
+from rclpy.parameter import Parameter
+from rclpy.duration import Duration
 
 class MainNode(Node):
     def __init__(self):
-        super().__init__('NARTECH_node')
+        super().__init__('NARTECH_node', parameter_overrides=[Parameter('use_sim_time', value=True)])
         # Create a single TF2 buffer and listener to be shared across modules.
-        self.tf_buffer = tf2_ros.Buffer()
-        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
+        self.tf_buffer = tf2_ros.Buffer(cache_time=Duration(seconds=30))
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self, spin_thread=True)
         # Instantiate the helper modules.
         self.pick = lambda x: None #overridden
         self.drop = lambda x: None #overridden
