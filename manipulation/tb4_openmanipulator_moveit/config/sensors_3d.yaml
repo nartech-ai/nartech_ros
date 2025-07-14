@@ -3,7 +3,7 @@ sensors:
 
 depth_camera:
   sensor_plugin: occupancy_map_monitor/DepthImageOctomapUpdater # name of the plugin that we are using : [PointCloudOctomapUpdater or DepthImageOctomapUpdater]
-  image_topic: /rgbd_camera/depth_image # topic to listen on for a depth image
+  image_topic: /rgbd_camera/depth_image_DISABLED # topic to listen on for a depth image
   queue_size: 1                             # number of images to queue up
   near_clipping_plane_distance: 0.1         # minimum distance before lack of visibility
   far_clipping_plane_distance: 1.0          # maximum distance before lack of visibility

@@ -36,7 +36,7 @@ def generate_launch_description():
                 {"use_sim_time": True},
                 {"moveit_simple_controller_manager": ros__params},
                 {"moveit_controller_manager": mgr_params},
-                sensor_params,
+                #sensor_params,
             ]
         )
     ])

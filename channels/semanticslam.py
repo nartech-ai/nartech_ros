@@ -23,7 +23,7 @@ class SemanticSLAM:
         # Mapping from object category to occupancy value
         self.M = { "wall": 100, "robot": 127, "chair": -120, "bench": -126, "table": -126,
                    "bottle": -125, "cup": -125, "can": -125, "person": -124,
-                   "fridge": -123, "sink": -122, "stove": -121, "unknown": -1 }
+                   "fridge": -123, "sink": -122, "stove": -121, "frisbee": -123, "unknown": -1 }
         self.previous_detections_persistence = 100000.0  # seconds
         self.previous_detections = {}
         # Downsampling parameters
@@ -49,6 +49,7 @@ class SemanticSLAM:
         self.origin = None
         self.mapupdate = 0
         self.goalstart = 0
+        self.inventory = []
 
     def occ_grid_callback(self, msg):
         self.node.get_logger().info("NEW OCC GRID")
@@ -85,13 +86,14 @@ class SemanticSLAM:
                 cell_value = self.get_block_occupancy(original_data, x, y, original_width, self.downsample_factor)
                 self.low_res_grid[new_idx] = cell_value
         # Update robot position using the Localization module.
-        self.robot_lowres_x, self.robot_lowres_y = self.localization.get_robot_lowres_position(
+        self.robot_lowres_x, self.robot_lowres_y, self.trans = self.localization.get_robot_lowres_position(
             original_origin, original_resolution, self.downsample_factor)
         if self.robot_lowres_x is not None and 0 <= self.robot_lowres_x < self.new_width and 0 <= self.robot_lowres_y < self.new_height:
             robot_idx = self.robot_lowres_y * self.new_width + self.robot_lowres_x
             self.low_res_grid[robot_idx] = 127  # Mark the robot cell.
-            self.previous_detections["{SELF}"] = (time.time(), self.robot_lowres_x, self.robot_lowres_y,
-                                                original_origin.position.x, original_origin.position.y)
+            for objectlabel in self.inventory + ["{SELF}"]:
+                self.previous_detections[objectlabel] = (time.time(), self.robot_lowres_x, self.robot_lowres_y,
+                                                         original_origin.position.x, original_origin.position.y, None, None, None)
             self.node.get_logger().info(f"Marked robot position at ({self.robot_lowres_x}, {self.robot_lowres_y}) as occupied.")
         else:
             self.node.get_logger().warn("Robot position is out of bounds in the downsampled map.")
@@ -104,7 +106,7 @@ class SemanticSLAM:
                     scores = detection[5:]
                     class_id = int(np.argmax(scores))
                     confidence = scores[class_id]
-                    if confidence > 0.5:  # Confidence threshold for semantic mapping
+                    if confidence > self.object_detector.minconf:  # Confidence threshold for semantic mapping
                         center_x = int(detection[0] * self.object_detector.width)
                         center_y = int(detection[1] * self.object_detector.height)
                         if depth_image is None:
@@ -112,12 +114,14 @@ class SemanticSLAM:
                             continue
                         depth_value = depth_image[center_y, center_x]
                         category = self.object_detector.classes[class_id]
+                        if category == "sports ball" or category == "orange":
+                            category = "frisbee"
+                            print("SEMANTIC SLAM: CATEGORY REMAP")
                         if depth_value > 0 and category in self.M:
-                            stamp = self.object_detector.last_image_stamp if self.object_detector.last_image_stamp else self.node.get_clock().now()
                             self.node.get_logger().info(f"DEPTH DEBUG: {depth_value}")
                             # Create a point in camera coordinates.
                             camera_point = PointStamped(
-                                header=Header(stamp=stamp.to_msg(), frame_id='oakd_left_camera_frame'),
+                                header=Header(stamp=Time().to_msg(), frame_id='oakd_left_camera_frame'),
                                 point=Point(
                                     x=depth_value,
                                     y=-(center_x - (self.object_detector.width / 2)) * depth_value / self.object_detector.fx,
@@ -126,15 +130,20 @@ class SemanticSLAM:
                             )
                             try:
                                 # Transform the point into the map frame.
-                                transformed_point = self.tf_buffer.transform(camera_point, 'map', timeout=Duration(seconds=1.0))
+                                camera_point.header.stamp = Time().to_msg()
+                                transformed_point_map = self.tf_buffer.transform(camera_point, 'map', timeout=Duration(seconds=1.0))
+                                camera_point.header.stamp = Time().to_msg()
+                                transformed_point_base_link = self.tf_buffer.transform(camera_point, 'base_link', timeout=Duration(seconds=1.0))
                                 object_grid_x, object_grid_y = self.get_lowres_position(
-                                    transformed_point.point.x, transformed_point.point.y,
+                                    transformed_point_map.point.x, transformed_point_map.point.y,
                                     original_origin, self.new_resolution
                                 )
                                 if category in self.M and 0 <= object_grid_x < self.new_width and 0 <= object_grid_y < self.new_height:
                                     obj_idx = object_grid_y * self.new_width + object_grid_x
                                     self.previous_detections[category] = (time.time(), object_grid_x, object_grid_y,
-                                                                          original_origin.position.x, original_origin.position.y)
+                                                                          original_origin.position.x, original_origin.position.y, 
+                                                                          transformed_point_map, transformed_point_base_link, 
+                                                                          (detection[0], detection[1], depth_value))
                                     self.low_res_grid[obj_idx] = self.M[category]
                                     self.node.get_logger().info(f"Marked detected object at ({object_grid_x}, {object_grid_y}) in grid.")
                                 else:
@@ -145,14 +154,14 @@ class SemanticSLAM:
             self.node.get_logger().warn("No detections received")
         # Update previously detected objects based on map shifts.
         for category in list(self.previous_detections.keys()):
-            (t, object_grid_x, object_grid_y, old_origin_x, old_origin_y) = self.previous_detections[category]
+            (t, object_grid_x, object_grid_y, old_origin_x, old_origin_y, old_point_map, old_point_base_link, imagecoords_depth) = self.previous_detections[category]
             current_origin_x = msg.info.origin.position.x
             current_origin_y = msg.info.origin.position.y
             offset_x = int(round((old_origin_x - current_origin_x) / self.new_resolution))
             offset_y = int(round((old_origin_y - current_origin_y) / self.new_resolution))
             new_object_grid_x = object_grid_x + offset_x
             new_object_grid_y = object_grid_y + offset_y
-            self.previous_detections[category] = (t, new_object_grid_x, new_object_grid_y, current_origin_x, current_origin_y)
+            self.previous_detections[category] = (t, new_object_grid_x, new_object_grid_y, current_origin_x, current_origin_y, old_point_map, old_point_base_link, imagecoords_depth)
             if category in self.M and 0 <= new_object_grid_x < self.new_width and 0 <= new_object_grid_y < self.new_height:
                 obj_idx = new_object_grid_y * self.new_width + new_object_grid_x
                 if time.time() - t < self.previous_detections_persistence and self.low_res_grid[obj_idx] != 127:

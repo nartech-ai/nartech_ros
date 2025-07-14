@@ -1,0 +1,74 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <!--
+    Orange ball with realistic rolling & gripping behaviour.
+    Changes from the original:
+      • Added <surface> block with contact stiffness/damping and
+        high 2‑D + torsional friction for ODE.
+      • Added <velocity_decay> for residual rolling resistance / air drag.
+      • Left visual radius slightly larger than collision to keep the
+        “squishy” look.
+  -->
+  <model name="orangeball">
+    <static>false</static>
+
+    <link name="link">
+      <!-- === Inertia === -->
+      <inertial>
+        <mass>0.01</mass> <!-- 10 g -->
+      </inertial>
+
+      <!-- === Collision geometry === -->
+      <collision name="collision">
+        <geometry>
+          <sphere><radius>0.03</radius></sphere> <!-- 3 cm -->
+        </geometry>
+
+        <!-- === Contact & friction tuning (ODE engine) === -->
+        <surface>
+          <!-- Contact stiffness / damping; prevents ratcheting -->
+          <contact>
+            <ode>
+              <kp>1.0e6</kp>
+              <kd>1.0e3</kd>  <!-- ≈1 % of kp -->
+              <min_depth>0.001</min_depth>
+            </ode>
+          </contact>
+
+          <!-- 2‑D friction (static & dynamic) -->
+          <friction>
+            <ode>
+              <mu>5.0</mu>
+              <mu2>5.0</mu2>
+
+              <!-- Torsional / rolling resistance -->
+              <torsional>
+                <coefficient>1.0</coefficient>   <!-- 0 =no torque, 1 ≈ rubber on wood -->
+                <surface_radius>0.03</surface_radius>
+                <use_patch_radius>false</use_patch_radius>
+              </torsional>
+            </ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <!-- === Visual (slightly puffier for cartoon look) === -->
+      <visual name="visual">
+        <geometry>
+          <sphere><radius>0.035</radius></sphere>
+        </geometry>
+        <material>
+          <ambient>1 0.5 0 1</ambient>
+          <diffuse>1 0.5 0 1</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+        </material>
+      </visual>
+
+      <!-- === Generic damping (works in any physics engine) === -->
+      <velocity_decay>
+        <linear>0.0</linear>   <!-- let it slide freely -->
+        <angular>0.2</angular> <!-- tweak 0.05–0.3 until it stops in ~5 s -->
+      </velocity_decay>
+    </link>
+  </model>
+</sdf>

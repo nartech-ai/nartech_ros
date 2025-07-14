@@ -5,6 +5,7 @@ from rclpy.duration import Duration
 from rclpy.time import Time
 import tf2_ros
 from geometry_msgs.msg import Quaternion
+from rclpy.time import Time
 
 class Localization:
     def __init__(self, node, tf_buffer):
@@ -16,7 +17,7 @@ class Localization:
             trans = self.tf_buffer.lookup_transform(
                 'map',
                 'base_link',
-                rclpy.time.Time(),
+                Time(),
                 timeout=Duration(seconds=1.0)
             )
             robot_x = trans.transform.translation.x
@@ -27,10 +28,10 @@ class Localization:
             robot_map_y = int((robot_y - map_origin_y) / original_resolution)
             robot_lowres_x = robot_map_x // downsample_factor
             robot_lowres_y = robot_map_y // downsample_factor
-            return robot_lowres_x, robot_lowres_y
+            return robot_lowres_x, robot_lowres_y, trans
         except Exception as e:
             self.node.get_logger().error(f"Transform exception: {str(e)}")
-            return None, None  # Default position if transform fails
+            return None, None, None  # Default position if transform fails
 
     def set_orientation_with_angle(self, angle_radians):
         if angle_radians is None:
