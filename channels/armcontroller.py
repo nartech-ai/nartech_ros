@@ -19,12 +19,11 @@ from rclpy.time import Time
 # Approach and grab params
 GOAL_TARGET_DISTANCE = 0.38 #0.37
 yaw_tol, depth_tol = 0.05, 0.02
-k_yaw,  k_fwd      = 0.3,  0.3
+k_yaw,  k_fwd      = 0.3,  0.2
 CORRECTION_DT      = 0.5
 GRIPPER_GRIP_HEIGHT = 0.2
-BACK_SPEED  = -0.15   # m/s   ( ≈0.75 m in 5 s )
-BACKUP_SEC  = 5.0     # how long to back up
-BACKUP_PUB_DT      = 0.1     # resend velocity at 10 Hz
+BACKUP_SPEED  = -0.1          # m/s
+BACKUP_LOSSTIME = 5.0         #after how many seconds to consider detection to be lost
 # Gripper Open and close angle
 GRIPPER_OPEN_TARGET = 0.019
 GRIPPER_CLOSE_TARGET = -0.01
@@ -187,52 +186,46 @@ class ArmController:
             return math.atan2(s, c)
         # ─── Timer callback ─────────────────────────────────────────────────────
         def correction_step() -> None:
-            # ─── guard: if a backup is already running, do nothing ───
-            if getattr(self, "_backup_in_progress", False):
-                return
             # ❶ Latest observation (needed *before* any read)
             (t, _, _, _, _, spoint_map, spoint_base_link, imagecoords_depth) = self.semantic_slam.previous_detections[objectlabel]
             # ❷ Abort if object missing for >5 s
-            if time.time() - t > 5.0 or spoint_base_link is None:
-                self._backup_in_progress = True
+            if time.time() - t > BACKUP_LOSSTIME or spoint_base_link is None:
+                self.correction_attempts += 1
                 back_twist = Twist()
-                back_twist.linear.x = BACK_SPEED
-                try:  #don't wait for optional transform (is fluently incorporated whenver ready)
-                    tf = self.navigation.localization.tf_buffer.lookup_transform('map', 'base_link', Time(), timeout=Duration(seconds=0.0))
+                back_twist.linear.x = BACKUP_SPEED
+                try:
+                    tf = self.semantic_slam.trans #robot position
                     # robot pose in map
                     rx, ry = tf.transform.translation.x, tf.transform.translation.y
                     yaw = yaw_from_quat(tf.transform.rotation)
                     # angle robot -> object in map
                     dx, dy = spoint_map.point.x - rx, spoint_map.point.y - ry
-                    angle = (math.atan2(dy, dx) - yaw + math.pi) % (2*math.pi) - math.pi
+                    angle  = math.atan2(dy, dx) - yaw
+                    angle  = (angle + math.pi) % (2 * math.pi) - math.pi
                     back_twist.angular.z = k_yaw * angle
                 except Exception as e:
-                    self.node.get_logger().warn(f"TF lookup map to base_link for improved backing away failed: {e}")
-                # ── keep publishing the same twist for the entire backup window ──
-                pub_timer = self.node.create_timer(BACKUP_PUB_DT, lambda: self.cmd_pub.publish(back_twist))
-                def _after_reverse():
+                    self.node.get_logger().warn(f"Improved backing away failed: {e}")
+                self.cmd_pub.publish(back_twist)
+                self.node.get_logger().info("arm_controller: Object absent → backed away")
+                if self.correction_attempts >= self.max_corrections:
                     _stop_motion()
-                    pub_timer.cancel()
-                    self.node.get_logger().info(f"arm_controller: Object absent → backed away "
-                                                f"{abs(BACK_SPEED)*BACKUP_SEC:.2f} m")
+                    self.correction_timer.cancel()
+                    self.node.get_logger().info("arm_controller: Too many corrections.")
                     ARM_STATE_SET("FREE"); NAV_STATE_SET(NAV_STATE_FAIL)
                     self.picking = False
-                    reverse_timer.cancel()          # stop this one-shot timer too
-                    self._backup_in_progress = False
-                reverse_timer = self.node.create_timer(BACKUP_SEC, _after_reverse)
-                # end this pick attempt; next one will create a new correction_timer
-                self.correction_timer.cancel()
                 return
             target_point = spoint_base_link.point
             # ❸ Control law
+            age = time.time() - t
+            w   = max(0.0, 1.0 - age / BACKUP_LOSSTIME)
             x_rel, _, depth = imagecoords_depth
             x_err           = (x_rel - 0.5) * 2.0
             depth_err       = depth - GOAL_TARGET_DISTANCE
             twist = Twist()
             if abs(x_err) > yaw_tol:
-                twist.angular.z = -k_yaw * x_err
+                twist.angular.z = -k_yaw * x_err * w
             if abs(depth_err) > depth_tol:
-                twist.linear.x = k_fwd * depth_err
+                twist.linear.x = k_fwd * depth_err * w
             self.cmd_pub.publish(twist)
             self.node.get_logger().info(f"Correction {self.correction_attempts + 1} | "
                                         f"x_err={x_err:+.2f}, depth={depth:.2f}, "
