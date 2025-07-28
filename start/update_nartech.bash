@@ -7,6 +7,7 @@
 # Check if the local branch is behind the remote branch
 
 if zenity --question --text="Do you want to update NARTECH?" --title="Update NARTECH" --icon="/home/nartech/Documents/logo.png"; then
+    ln -s ~/PLN/examples/PLN.py ~/nartech_ws/src/nartech_ros/
     cd ~/nartech_ws/src
     rm -rf nartech_moveit_config
     cd ~
